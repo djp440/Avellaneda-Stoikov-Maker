@@ -1,6 +1,7 @@
 const AvellanedaCalculator = require('./calculator');
 const { IndicatorsManager } = require('./indicators');
 const ExchangeManager = require('./exchange');
+const RiskManager = require('./risk-manager');
 const Helpers = require('../utils/helpers');
 const Logger = require('../utils/logger');
 
@@ -16,6 +17,7 @@ class AvellanedaStrategy {
         this.calculator = new AvellanedaCalculator(config);
         this.indicators = new IndicatorsManager(config);
         this.exchangeManager = new ExchangeManager(config);
+        this.riskManager = new RiskManager(config);
         
         // 策略状态
         this.isRunning = false;
@@ -60,7 +62,8 @@ class AvellanedaStrategy {
         
         this.logger.info('AvellanedaStrategy initialized', {
             orderRefreshTime: this.orderRefreshTime,
-            filledOrderDelay: this.filledOrderDelay
+            filledOrderDelay: this.filledOrderDelay,
+            riskManager: 'enabled'
         });
     }
 
@@ -184,6 +187,12 @@ class AvellanedaStrategy {
             // 初始化技术指标
             this.indicators.initialize();
             
+            // 初始化风险管理器
+            const riskInitialized = await this.riskManager.initialize();
+            if (!riskInitialized) {
+                throw new Error('Failed to initialize risk manager');
+            }
+            
             // 标记为已初始化
             this.isInitialized = true;
             
@@ -253,6 +262,9 @@ class AvellanedaStrategy {
         try {
             this.isRunning = false;
             
+            // 停止风险管理器
+            this.riskManager.cleanup();
+            
             // 取消所有活跃订单
             await this.cancelAllOrders();
             
@@ -273,6 +285,14 @@ class AvellanedaStrategy {
     async mainLoop() {
         while (this.isRunning) {
             try {
+                // 检查风险状态
+                const riskStatus = this.riskManager.getRiskStatus();
+                if (riskStatus.state.isEmergencyStop) {
+                    this.logger.warn('Strategy paused due to emergency stop');
+                    await this.sleep(10000); // 紧急停止时等待更长时间
+                    continue;
+                }
+                
                 // 检查指标是否准备就绪
                 if (this.indicators.isReady()) {
                     // 执行策略逻辑
@@ -399,6 +419,13 @@ class AvellanedaStrategy {
                 totalInventoryValue: calculatorState.inventoryValue.totalValue
             };
             
+            // 更新风险管理器的持仓信息
+            this.riskManager.updatePosition(
+                this.currentBalances.baseAmount,
+                calculatorState.inventoryValue.totalValue,
+                this.currentMarketData.midPrice
+            );
+            
             // 检查是否需要更新订单
             if (this.shouldUpdateOrders()) {
                 await this.updateOrders();
@@ -494,17 +521,29 @@ class AvellanedaStrategy {
             
             // 创建买单
             if (buyAmount > 0 && optimalBid > 0) {
-                const buyOrder = await this.createOrder('buy', buyAmount, optimalBid);
-                if (buyOrder) {
-                    this.activeOrders.set(buyOrder.id, buyOrder);
+                // 风险验证
+                const buyValidation = this.riskManager.validateOrder('buy', buyAmount, optimalBid);
+                if (buyValidation.valid) {
+                    const buyOrder = await this.createOrder('buy', buyAmount, optimalBid);
+                    if (buyOrder) {
+                        this.activeOrders.set(buyOrder.id, buyOrder);
+                    }
+                } else {
+                    this.logger.warn('Buy order rejected by risk manager', buyValidation);
                 }
             }
             
             // 创建卖单
             if (sellAmount > 0 && optimalAsk > 0) {
-                const sellOrder = await this.createOrder('sell', sellAmount, optimalAsk);
-                if (sellOrder) {
-                    this.activeOrders.set(sellOrder.id, sellOrder);
+                // 风险验证
+                const sellValidation = this.riskManager.validateOrder('sell', sellAmount, optimalAsk);
+                if (sellValidation.valid) {
+                    const sellOrder = await this.createOrder('sell', sellAmount, optimalAsk);
+                    if (sellOrder) {
+                        this.activeOrders.set(sellOrder.id, sellOrder);
+                    }
+                } else {
+                    this.logger.warn('Sell order rejected by risk manager', sellValidation);
                 }
             }
             
@@ -608,6 +647,10 @@ class AvellanedaStrategy {
             // 从活跃订单中移除
             this.activeOrders.delete(order.id);
             
+            // 更新已实现盈亏（这里简化处理，实际应该根据成本价计算）
+            const realizedPnL = this.calculateRealizedPnL(order);
+            this.riskManager.updateRealizedPnL(realizedPnL);
+            
             // 延迟创建新订单
             setTimeout(() => {
                 if (this.isRunning) {
@@ -618,6 +661,18 @@ class AvellanedaStrategy {
         } catch (error) {
             this.logger.error('Failed to handle order filled', error);
         }
+    }
+    
+    /**
+     * 计算已实现盈亏
+     */
+    calculateRealizedPnL(order) {
+        // 这里简化计算，实际应该根据持仓成本价计算
+        // 对于做市策略，通常通过买卖价差获得利润
+        const spread = this.currentMarketData.bestAsk - this.currentMarketData.bestBid;
+        const estimatedPnL = order.amount * spread * 0.5; // 假设获得一半价差
+        
+        return estimatedPnL;
     }
 
     /**
@@ -660,6 +715,7 @@ class AvellanedaStrategy {
             balances: this.currentBalances,
             strategyState: this.strategyState,
             indicators: this.indicators.getStatus(),
+            riskStatus: this.riskManager.getRiskStatus(),
             activeOrders: Array.from(this.activeOrders.values()),
             orderHistory: this.orderHistory.slice(-10) // 最近10个订单
         };
