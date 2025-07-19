@@ -49,29 +49,29 @@ class ConfigValidator {
     static validateRisk(config) {
         const errors = [];
         
-        if (config.maxPositionSize <= 0) {
-            errors.push('MAX_POSITION_SIZE must be positive');
+        if (config.maxPositionSizePercent <= 0 || config.maxPositionSizePercent > 100) {
+            errors.push('MAX_POSITION_SIZE_PERCENT must be between 0 and 100');
         }
-        if (config.maxPositionValue <= 0) {
-            errors.push('MAX_POSITION_VALUE must be positive');
+        if (config.maxPositionValuePercent <= 0 || config.maxPositionValuePercent > 100) {
+            errors.push('MAX_POSITION_VALUE_PERCENT must be between 0 and 100');
         }
         if (config.stopLossPercent <= 0 || config.stopLossPercent > 100) {
             errors.push('STOP_LOSS_PERCENT must be between 0 and 100');
         }
-        if (config.stopLossAmount <= 0) {
-            errors.push('STOP_LOSS_AMOUNT must be positive');
+        if (config.stopLossAmountPercent <= 0 || config.stopLossAmountPercent > 100) {
+            errors.push('STOP_LOSS_AMOUNT_PERCENT must be between 0 and 100');
         }
         if (config.maxDrawdown <= 0 || config.maxDrawdown > 100) {
             errors.push('MAX_DRAWDOWN must be between 0 and 100');
         }
-        if (config.maxDailyLoss <= 0) {
-            errors.push('MAX_DAILY_LOSS must be positive');
+        if (config.maxDailyLossPercent <= 0 || config.maxDailyLossPercent > 100) {
+            errors.push('MAX_DAILY_LOSS_PERCENT must be between 0 and 100');
         }
-        if (config.maxOrderSize <= 0) {
-            errors.push('MAX_ORDER_SIZE must be positive');
+        if (config.maxOrderSizePercent <= 0 || config.maxOrderSizePercent > 100) {
+            errors.push('MAX_ORDER_SIZE_PERCENT must be between 0 and 100');
         }
-        if (config.maxOrderValue <= 0) {
-            errors.push('MAX_ORDER_VALUE must be positive');
+        if (config.maxOrderValuePercent <= 0 || config.maxOrderValuePercent > 100) {
+            errors.push('MAX_ORDER_VALUE_PERCENT must be between 0 and 100');
         }
         if (config.riskCheckInterval < 1000) {
             errors.push('RISK_CHECK_INTERVAL must be at least 1000ms');
@@ -126,16 +126,16 @@ class StrategyConfig {
             filledOrderDelay: this.parseInt(process.env.FILLED_ORDER_DELAY, 1000),
 
             // 风险管理
-            maxPositionSize: this.parseFloat(process.env.MAX_POSITION_SIZE, 1000),
-            maxPositionValue: this.parseFloat(process.env.MAX_POSITION_VALUE, 50000),
+            maxPositionSizePercent: this.parseFloat(process.env.MAX_POSITION_SIZE_PERCENT, 10.0),
+            maxPositionValuePercent: this.parseFloat(process.env.MAX_POSITION_VALUE_PERCENT, 50.0),
             targetInventory: this.parseFloat(process.env.TARGET_INVENTORY, 0),
             stopLossPercent: this.parseFloat(process.env.STOP_LOSS_PERCENT, 2.0),
-            stopLossAmount: this.parseFloat(process.env.STOP_LOSS_AMOUNT, 1000),
+            stopLossAmountPercent: this.parseFloat(process.env.STOP_LOSS_AMOUNT_PERCENT, 1.0),
             trailingStopLoss: this.parseBoolean(process.env.TRAILING_STOP_LOSS, false),
             maxDrawdown: this.parseFloat(process.env.MAX_DRAWDOWN, 5.0),
-            maxDailyLoss: this.parseFloat(process.env.MAX_DAILY_LOSS, 2000),
-            maxOrderSize: this.parseFloat(process.env.MAX_ORDER_SIZE, 100),
-            maxOrderValue: this.parseFloat(process.env.MAX_ORDER_VALUE, 5000),
+            maxDailyLossPercent: this.parseFloat(process.env.MAX_DAILY_LOSS_PERCENT, 2.0),
+            maxOrderSizePercent: this.parseFloat(process.env.MAX_ORDER_SIZE_PERCENT, 1.0),
+            maxOrderValuePercent: this.parseFloat(process.env.MAX_ORDER_VALUE_PERCENT, 5.0),
             riskCheckInterval: this.parseInt(process.env.RISK_CHECK_INTERVAL, 5000),
             emergencyStopThreshold: this.parseFloat(process.env.EMERGENCY_STOP_THRESHOLD, 10.0),
 

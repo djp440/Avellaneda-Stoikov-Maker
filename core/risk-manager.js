@@ -12,21 +12,21 @@ class RiskManager {
         
         // 风险配置
         this.riskConfig = {
-            // 持仓限制
-            maxPositionSize: config.get('maxPositionSize') || 1000, // 最大持仓数量
-            maxPositionValue: config.get('maxPositionValue') || 50000, // 最大持仓价值
+            // 持仓限制 (百分比)
+            maxPositionSizePercent: config.get('maxPositionSizePercent') || 10.0, // 最大持仓数量百分比
+            maxPositionValuePercent: config.get('maxPositionValuePercent') || 50.0, // 最大持仓价值百分比
             targetInventory: config.get('targetInventory') || 0, // 目标库存
             
             // 止损设置
             stopLossPercent: config.get('stopLossPercent') || 2.0, // 止损百分比
-            stopLossAmount: config.get('stopLossAmount') || 1000, // 止损金额
+            stopLossAmountPercent: config.get('stopLossAmountPercent') || 1.0, // 止损金额百分比
             trailingStopLoss: config.get('trailingStopLoss') || false, // 追踪止损
             
             // 资金管理
             maxDrawdown: config.get('maxDrawdown') || 5.0, // 最大回撤百分比
-            maxDailyLoss: config.get('maxDailyLoss') || 2000, // 最大日亏损
-            maxOrderSize: config.get('maxOrderSize') || 100, // 最大单笔订单数量
-            maxOrderValue: config.get('maxOrderValue') || 5000, // 最大单笔订单价值
+            maxDailyLossPercent: config.get('maxDailyLossPercent') || 2.0, // 最大日亏损百分比
+            maxOrderSizePercent: config.get('maxOrderSizePercent') || 1.0, // 最大单笔订单数量百分比
+            maxOrderValuePercent: config.get('maxOrderValuePercent') || 5.0, // 最大单笔订单价值百分比
             
             // 风险监控
             riskCheckInterval: config.get('riskCheckInterval') || 5000, // 风险检查间隔(毫秒)
@@ -37,6 +37,7 @@ class RiskManager {
         this.riskState = {
             currentPosition: 0, // 当前持仓
             currentPositionValue: 0, // 当前持仓价值
+            totalAccountValue: 0, // 账户总价值
             unrealizedPnL: 0, // 未实现盈亏
             realizedPnL: 0, // 已实现盈亏
             totalPnL: 0, // 总盈亏
@@ -156,21 +157,34 @@ class RiskManager {
     async checkPositionLimits() {
         const position = Math.abs(this.riskState.currentPosition);
         const positionValue = Math.abs(this.riskState.currentPositionValue);
+        const totalAccountValue = this.riskState.totalAccountValue;
         
-        const positionLimitExceeded = position > this.riskConfig.maxPositionSize;
-        const valueLimitExceeded = positionValue > this.riskConfig.maxPositionValue;
+        // 如果账户总价值为0，跳过检查
+        if (totalAccountValue <= 0) {
+            return { triggered: false };
+        }
         
-        if (positionLimitExceeded || valueLimitExceeded) {
+        // 计算基于百分比的限制
+        const maxPositionValue = totalAccountValue * (this.riskConfig.maxPositionValuePercent / 100);
+        const maxPositionSize = totalAccountValue * (this.riskConfig.maxPositionSizePercent / 100);
+        
+        const positionLimitExceeded = positionValue > maxPositionValue;
+        const sizeLimitExceeded = position > maxPositionSize;
+        
+        if (positionLimitExceeded || sizeLimitExceeded) {
             return {
                 type: 'POSITION_LIMIT',
                 triggered: true,
                 severity: 'HIGH',
-                message: `Position limits exceeded: size=${position}/${this.riskConfig.maxPositionSize}, value=${positionValue}/${this.riskConfig.maxPositionValue}`,
+                message: `Position limits exceeded: size=${position}/${maxPositionSize.toFixed(2)} (${this.riskConfig.maxPositionSizePercent}%), value=${positionValue}/${maxPositionValue.toFixed(2)} (${this.riskConfig.maxPositionValuePercent}%)`,
                 data: {
                     currentPosition: position,
                     currentValue: positionValue,
-                    maxPosition: this.riskConfig.maxPositionSize,
-                    maxValue: this.riskConfig.maxPositionValue
+                    maxPosition: maxPositionSize,
+                    maxValue: maxPositionValue,
+                    maxPositionPercent: this.riskConfig.maxPositionSizePercent,
+                    maxValuePercent: this.riskConfig.maxPositionValuePercent,
+                    totalAccountValue
                 }
             };
         }
@@ -184,28 +198,36 @@ class RiskManager {
     async checkStopLoss() {
         const unrealizedPnL = this.riskState.unrealizedPnL;
         const totalPnL = this.riskState.totalPnL;
+        const totalAccountValue = this.riskState.totalAccountValue;
+        
+        // 如果账户总价值为0，跳过检查
+        if (totalAccountValue <= 0) {
+            return { triggered: false };
+        }
         
         // 检查百分比止损
-        const stopLossAmount = this.riskConfig.stopLossAmount;
+        const stopLossAmountPercent = this.riskConfig.stopLossAmountPercent;
         const stopLossPercent = this.riskConfig.stopLossPercent;
         
         // 计算止损金额
-        const absoluteStopLoss = Math.abs(stopLossAmount);
-        const percentStopLoss = totalPnL * (stopLossPercent / 100);
+        const absoluteStopLoss = totalAccountValue * (stopLossAmountPercent / 100);
+        const percentStopLoss = totalAccountValue * (stopLossPercent / 100);
         
         // 只有当未实现盈亏为负数时才检查止损
         if (unrealizedPnL < 0) {
-            if (unrealizedPnL < -absoluteStopLoss || unrealizedPnL < percentStopLoss) {
+            if (unrealizedPnL < -absoluteStopLoss || unrealizedPnL < -percentStopLoss) {
                 return {
                     type: 'STOP_LOSS',
                     triggered: true,
                     severity: 'CRITICAL',
-                    message: `Stop loss triggered: unrealizedPnL=${unrealizedPnL}, stopLoss=${Math.min(-absoluteStopLoss, percentStopLoss)}`,
+                    message: `Stop loss triggered: unrealizedPnL=${unrealizedPnL}, stopLoss=${Math.min(-absoluteStopLoss, -percentStopLoss)} (${Math.min(stopLossAmountPercent, stopLossPercent)}%)`,
                     data: {
                         unrealizedPnL,
                         absoluteStopLoss,
                         percentStopLoss,
-                        stopLossPercent
+                        stopLossAmountPercent,
+                        stopLossPercent,
+                        totalAccountValue
                     }
                 };
             }
@@ -241,7 +263,14 @@ class RiskManager {
      */
     async checkDailyLoss() {
         const dailyPnL = this.riskState.dailyPnL;
-        const maxDailyLoss = this.riskConfig.maxDailyLoss;
+        const totalAccountValue = this.riskState.totalAccountValue;
+        
+        // 如果账户总价值为0，跳过检查
+        if (totalAccountValue <= 0) {
+            return { triggered: false };
+        }
+        
+        const maxDailyLoss = totalAccountValue * (this.riskConfig.maxDailyLossPercent / 100);
         
         // 只有当日盈亏为负数时才检查日亏损限制
         if (dailyPnL < 0 && dailyPnL < -maxDailyLoss) {
@@ -249,10 +278,12 @@ class RiskManager {
                 type: 'DAILY_LOSS',
                 triggered: true,
                 severity: 'HIGH',
-                message: `Daily loss limit exceeded: ${dailyPnL} < -${maxDailyLoss}`,
+                message: `Daily loss limit exceeded: ${dailyPnL} < -${maxDailyLoss.toFixed(2)} (${this.riskConfig.maxDailyLossPercent}%)`,
                 data: {
                     dailyPnL,
-                    maxDailyLoss
+                    maxDailyLoss,
+                    maxDailyLossPercent: this.riskConfig.maxDailyLossPercent,
+                    totalAccountValue
                 }
             };
         }
@@ -495,6 +526,19 @@ class RiskManager {
     }
     
     /**
+     * 更新账户总价值
+     */
+    updateAccountValue(totalAccountValue) {
+        const oldValue = this.riskState.totalAccountValue;
+        this.riskState.totalAccountValue = totalAccountValue;
+        
+        this.logger.debug('Account value updated', {
+            oldValue,
+            newValue: totalAccountValue
+        });
+    }
+    
+    /**
      * 更新已实现盈亏
      */
     updateRealizedPnL(realizedPnL) {
@@ -574,6 +618,7 @@ class RiskManager {
      */
     validateOrder(side, amount, price) {
         const orderValue = amount * price;
+        const totalAccountValue = this.riskState.totalAccountValue;
         
         // 检查紧急停止状态
         if (this.riskState.isEmergencyStop) {
@@ -584,20 +629,29 @@ class RiskManager {
             };
         }
         
+        // 如果账户总价值为0，跳过订单限制检查
+        if (totalAccountValue <= 0) {
+            return { valid: true };
+        }
+        
+        // 计算基于百分比的限制
+        const maxOrderSize = totalAccountValue * (this.riskConfig.maxOrderSizePercent / 100);
+        const maxOrderValue = totalAccountValue * (this.riskConfig.maxOrderValuePercent / 100);
+        
         // 检查订单大小限制
-        if (amount > this.riskConfig.maxOrderSize) {
+        if (amount > maxOrderSize) {
             return {
                 valid: false,
-                reason: `Order size ${amount} exceeds maximum ${this.riskConfig.maxOrderSize}`,
+                reason: `Order size ${amount} exceeds maximum ${maxOrderSize.toFixed(2)} (${this.riskConfig.maxOrderSizePercent}%)`,
                 type: 'ORDER_SIZE_LIMIT'
             };
         }
         
         // 检查订单价值限制
-        if (orderValue > this.riskConfig.maxOrderValue) {
+        if (orderValue > maxOrderValue) {
             return {
                 valid: false,
-                reason: `Order value ${orderValue} exceeds maximum ${this.riskConfig.maxOrderValue}`,
+                reason: `Order value ${orderValue} exceeds maximum ${maxOrderValue.toFixed(2)} (${this.riskConfig.maxOrderValuePercent}%)`,
                 type: 'ORDER_VALUE_LIMIT'
             };
         }

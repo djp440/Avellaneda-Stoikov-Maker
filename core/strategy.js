@@ -419,12 +419,16 @@ class AvellanedaStrategy {
                 totalInventoryValue: calculatorState.inventoryValue.totalValue
             };
             
-            // 更新风险管理器的持仓信息
+            // 更新风险管理器的持仓信息和账户总价值
             this.riskManager.updatePosition(
                 this.currentBalances.baseAmount,
                 calculatorState.inventoryValue.totalValue,
                 this.currentMarketData.midPrice
             );
+            
+            // 更新账户总价值
+            const totalAccountValue = calculatorState.inventoryValue.totalValue;
+            this.riskManager.updateAccountValue(totalAccountValue);
             
             // 检查是否需要更新订单
             if (this.shouldUpdateOrders()) {
