@@ -1,6 +1,5 @@
 const ccxt = require('ccxt');
 const EventEmitter = require('events');
-const { SocksProxyAgent } = require('socks-proxy-agent');
 const Helpers = require('../utils/helpers');
 const Logger = require('../utils/logger');
 
@@ -13,10 +12,6 @@ class ExchangeManager extends EventEmitter {
         super();
         this.config = config;
         this.logger = new Logger(config);
-        
-        // 代理配置
-        this.proxyUrl = 'socks5://127.0.0.1:7897';
-        this.agent = new SocksProxyAgent(this.proxyUrl);
         
         // 交易所实例
         this.exchange = null;
@@ -172,7 +167,6 @@ class ExchangeManager extends EventEmitter {
                 password: exchangeConfig.password, // Bitget需要passphrase
                 sandbox: this.config.isSandbox(),
                 enableRateLimit: true,
-                agent: this.agent, // 使用SOCKS5代理
                 options: {
                     defaultType: 'spot',
                     adjustForTimeDifference: true

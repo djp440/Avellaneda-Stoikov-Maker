@@ -20,3 +20,4 @@ alwaysApply: true
 3. 编码风格应该简洁易读
 4. 在终端中使用PowerShell语法
 5. 不要使用沙盒环境，bitget交易所没有沙盒环境
+6. 始终使用ccxt框架与交易所进行连接，不要自己编写api请求
