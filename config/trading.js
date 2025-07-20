@@ -5,22 +5,22 @@
 
 module.exports = {
     // 交易对配置
-    symbol: 'BTC/USDT',                    // 交易对符号，格式为 基础货币/计价货币
-    baseCurrency: 'BTC',                   // 基础货币，即被交易的货币
+    symbol: 'SOL/USDT',                    // 交易对符号，格式为 基础货币/计价货币
+    baseCurrency: 'SOL',                   // 基础货币，即被交易的货币
     quoteCurrency: 'USDT',                 // 计价货币，即用于计价的货币
 
     // 策略参数
     riskFactor: 0.1,                       // 风险因子，控制策略的激进程度，值越大风险越高
-    orderAmount: 0.00006,                  // 单笔订单数量，以基础货币为单位
+    orderAmount: 0.04,                  // 单笔订单数量，以基础货币为单位
     minSpread: 0.001,                      // 最小价差，低于此值不会下单
     maxSpread: 0.03,                       // 最大价差，高于此值不会下单
     inventoryTarget: 0,                    // 库存目标，0表示中性，正数表示做多偏好，负数表示做空偏好
     shapeFactor: 1.0,                      // 形状因子，影响订单簿的形状，控制订单分布
 
     // 执行控制
-    updateInterval: 5000,                  // 更新间隔，策略执行频率，单位为毫秒
+    updateInterval: 3000,                  // 更新间隔，策略执行频率，单位为毫秒
     maxOrders: 10,                         // 最大订单数量，同时存在的订单上限
-    orderTimeout: 30000,                   // 订单超时时间，单位为毫秒，超时后取消订单
+    orderTimeout: 12000,                   // 订单超时时间，单位为毫秒，超时后取消订单
 
     // 风险管理 - 持仓控制
     maxPositionValuePercent: 50.0,         // 最大持仓价值百分比，相对于账户总价值
