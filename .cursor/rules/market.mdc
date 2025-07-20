@@ -5,6 +5,7 @@ alwaysApply: true
 @docs/AVELLANEDA_JS_DEVELOPMENT_GUIDE.md --- 这是项目的开发文档
 @docs/开发简要记录.md --- 这是项目的开发记录
 @python原代码/ --- 这个文件夹里有策略的python原始代码
+@config/trading.js ---策略的配置文件
 
 # 工作流程
 1. 浏览项目，了解项目内容和结构

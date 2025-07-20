@@ -1,5 +1,6 @@
 const dotenv = require('dotenv');
 const path = require('path');
+const tradingConfig = require('./trading');
 
 // 加载环境变量
 dotenv.config();
@@ -97,7 +98,7 @@ class StrategyConfig {
 
     loadConfig() {
         this.config = {
-            // 交易所配置
+            // 交易所配置 - 从环境变量读取敏感数据
             exchange: {
                 name: process.env.EXCHANGE || 'bitget',
                 apiKey: process.env.EXCHANGE_API_KEY,
@@ -106,51 +107,54 @@ class StrategyConfig {
                 sandbox: this.parseBoolean(process.env.EXCHANGE_SANDBOX, false)
             },
 
-            // 交易对配置
-            symbol: process.env.SYMBOL || 'BTC/USDT',
-            baseCurrency: process.env.BASE_CURRENCY || 'BTC',
-            quoteCurrency: process.env.QUOTE_CURRENCY || 'USDT',
+            // 交易对配置 - 从trading.js读取
+            symbol: tradingConfig.symbol,
+            baseCurrency: tradingConfig.baseCurrency,
+            quoteCurrency: tradingConfig.quoteCurrency,
 
-            // 策略参数
-            riskFactor: this.parseFloat(process.env.RISK_FACTOR, 0.1),
-            orderAmount: this.parseFloat(process.env.ORDER_AMOUNT, 0.001),
-            minSpread: this.parseFloat(process.env.MIN_SPREAD, 0.0001),
-            maxSpread: this.parseFloat(process.env.MAX_SPREAD, 0.01),
-            inventoryTarget: this.parseFloat(process.env.INVENTORY_TARGET, 0),
-            shapeFactor: this.parseFloat(process.env.SHAPE_FACTOR, 1.0),
+            // 策略参数 - 从trading.js读取
+            riskFactor: tradingConfig.riskFactor,
+            orderAmount: tradingConfig.orderAmount,
+            minSpread: tradingConfig.minSpread,
+            maxSpread: tradingConfig.maxSpread,
+            inventoryTarget: tradingConfig.inventoryTarget,
+            shapeFactor: tradingConfig.shapeFactor,
 
-            // 执行控制
-            updateInterval: this.parseInt(process.env.UPDATE_INTERVAL, 1000),
-            maxOrders: this.parseInt(process.env.MAX_ORDERS, 10),
-            orderTimeout: this.parseInt(process.env.ORDER_TIMEOUT, 30000),
-            filledOrderDelay: this.parseInt(process.env.FILLED_ORDER_DELAY, 1000),
+            // 执行控制 - 从trading.js读取
+            updateInterval: tradingConfig.updateInterval,
+            maxOrders: tradingConfig.maxOrders,
+            orderTimeout: tradingConfig.orderTimeout,
+            filledOrderDelay: 1000, // 默认值
 
-            // 技术指标配置
-            volatilityBufferSize: this.parseInt(process.env.VOLATILITY_BUFFER_SIZE, 20),
-            volatilityAlpha: this.parseFloat(process.env.VOLATILITY_ALPHA, 0.94),
-            tradingIntensityBufferSize: this.parseInt(process.env.TRADING_INTENSITY_BUFFER_SIZE, 20),
-            orderBookDepth: this.parseInt(process.env.ORDER_BOOK_DEPTH, 10),
+            // 技术指标配置 - 从trading.js读取
+            volatilityBufferSize: tradingConfig.volatilityBufferSize,
+            volatilityAlpha: tradingConfig.volatilityAlpha,
+            tradingIntensityBufferSize: tradingConfig.tradingIntensityBufferSize,
+            orderBookDepth: tradingConfig.orderBookDepth,
 
-            // 风险管理
-            maxPositionSizePercent: this.parseFloat(process.env.MAX_POSITION_SIZE_PERCENT, 10.0),
-            maxPositionValuePercent: this.parseFloat(process.env.MAX_POSITION_VALUE_PERCENT, 50.0),
-            targetInventory: this.parseFloat(process.env.TARGET_INVENTORY, 0),
-            stopLossPercent: this.parseFloat(process.env.STOP_LOSS_PERCENT, 2.0),
-            stopLossAmountPercent: this.parseFloat(process.env.STOP_LOSS_AMOUNT_PERCENT, 1.0),
-            trailingStopLoss: this.parseBoolean(process.env.TRAILING_STOP_LOSS, false),
-            maxDrawdown: this.parseFloat(process.env.MAX_DRAWDOWN, 5.0),
-            maxDailyLossPercent: this.parseFloat(process.env.MAX_DAILY_LOSS_PERCENT, 2.0),
-            maxOrderSizePercent: this.parseFloat(process.env.MAX_ORDER_SIZE_PERCENT, 1.0),
-            maxOrderValuePercent: this.parseFloat(process.env.MAX_ORDER_VALUE_PERCENT, 5.0),
-            riskCheckInterval: this.parseInt(process.env.RISK_CHECK_INTERVAL, 5000),
-            emergencyStopThreshold: this.parseFloat(process.env.EMERGENCY_STOP_THRESHOLD, 10.0),
+            // 风险管理 - 从trading.js读取
+            maxPositionSizePercent: 10.0, // 默认值
+            maxPositionValuePercent: tradingConfig.maxPositionValuePercent,
+            targetInventory: tradingConfig.targetInventory,
+            stopLossPercent: tradingConfig.stopLossPercent,
+            stopLossAmountPercent: tradingConfig.stopLossAmountPercent,
+            trailingStopLoss: tradingConfig.trailingStopLoss,
+            maxDrawdown: tradingConfig.maxDrawdown,
+            maxDailyLossPercent: tradingConfig.maxDailyLossPercent,
+            maxOrderSizePercent: tradingConfig.maxOrderSizePercent,
+            maxOrderValuePercent: tradingConfig.maxOrderValuePercent,
+            riskCheckInterval: tradingConfig.riskCheckInterval,
+            emergencyStopThreshold: tradingConfig.emergencyStopThreshold,
 
-            // 日志配置
-            logLevel: process.env.LOG_LEVEL || 'info',
-            logFile: process.env.LOG_FILE || 'logs/strategy.log',
+            // 日志配置 - 从trading.js读取
+            logLevel: tradingConfig.logLevel,
+            logFile: tradingConfig.logFile,
 
-            // 环境配置
-            nodeEnv: process.env.NODE_ENV || 'development'
+            // 环境配置 - 从trading.js读取
+            nodeEnv: tradingConfig.nodeEnv,
+
+            // 代理配置 - 从trading.js读取
+            proxy: tradingConfig.proxy
         };
     }
 
