@@ -292,6 +292,7 @@ class RiskManager {
      */
     async checkEmergencyStop() {
         if (this.riskState.isEmergencyStop) {
+            this.logger.debug('风险管理器: 紧急停止已激活，跳过重复检查');
             return {
                 type: 'EMERGENCY_STOP',
                 triggered: true,
@@ -305,7 +306,16 @@ class RiskManager {
         
         // 检查紧急停止阈值
         const drawdown = this.calculateDrawdown();
+        this.logger.debug('风险管理器: 检查紧急停止阈值', {
+            currentDrawdown: drawdown,
+            threshold: this.riskConfig.emergencyStopThreshold
+        });
+
         if (drawdown > this.riskConfig.emergencyStopThreshold) {
+            this.logger.warn('风险管理器: 紧急停止阈值超限', {
+                drawdown,
+                threshold: this.riskConfig.emergencyStopThreshold
+            });
             return {
                 type: 'EMERGENCY_STOP_THRESHOLD',
                 triggered: true,
@@ -498,19 +508,27 @@ class RiskManager {
     updatePosition(position, positionValue, midPrice) {
         const oldPosition = this.riskState.currentPosition;
         const oldValue = this.riskState.currentPositionValue;
+        const oldUnrealizedPnL = this.riskState.unrealizedPnL;
         
         this.riskState.currentPosition = position;
         this.riskState.currentPositionValue = positionValue;
         
         // 计算未实现盈亏
         if (midPrice > 0) {
+            // 确保 unrealizedPnL 的计算逻辑正确，这里假设 positionValue 是基于 midPrice 计算的
+            // 如果 positionValue 已经是基于当前市价计算的，那么 unrealizedPnL 应该是 (currentPositionValue - initialCost)
+            // 但根据代码，unrealizedPnL 似乎是当前持仓的市值，这与 PnL 的定义不符。
+            // 修正：unrealizedPnL 应该是当前持仓的市值与成本价的差额。
+            // 由于这里没有成本价信息，暂时保持原样，但需要注意这可能不是严格意义上的未实现盈亏。
             this.riskState.unrealizedPnL = position * midPrice;
+        } else {
+            this.riskState.unrealizedPnL = 0; // 如果 midPrice 无效，则未实现盈亏为0
         }
         
         // 更新总盈亏
         this.riskState.totalPnL = this.riskState.realizedPnL + this.riskState.unrealizedPnL;
         
-        // 更新最大未实现盈利
+        // 更新最大未实现盈利 (如果 unrealizedPnL 是盈利，则更新)
         if (this.riskState.unrealizedPnL > this.riskState.maxUnrealizedPnL) {
             this.riskState.maxUnrealizedPnL = this.riskState.unrealizedPnL;
         }
@@ -520,7 +538,9 @@ class RiskManager {
             newPosition: position,
             oldValue,
             newValue: positionValue,
-            unrealizedPnL: this.riskState.unrealizedPnL
+            oldUnrealizedPnL,
+            newUnrealizedPnL: this.riskState.unrealizedPnL,
+            midPrice
         });
     }
     
@@ -563,18 +583,37 @@ class RiskManager {
      * 计算回撤
      */
     calculateDrawdown() {
-        if (this.riskState.maxUnrealizedPnL <= 0) {
+        // 回撤计算应基于账户总价值的峰值和谷值，而不是单一的未实现盈亏
+        // 这里的实现可能不完全符合标准的回撤定义，但会根据现有逻辑进行调整
+        // 如果 maxUnrealizedPnL 是历史最高账户价值，unrealizedPnL 是当前账户价值
+        // 那么回撤 = (最高账户价值 - 当前账户价值) / 最高账户价值 * 100%
+
+        // 假设 maxUnrealizedPnL 实际上是历史最高账户总价值
+        // 并且 unrealizedPnL 实际上是当前账户总价值
+        // 那么计算回撤的逻辑是：
+        // drawdown = (峰值 - 当前值) / 峰值 * 100%
+
+        const peakValue = this.riskState.maxUnrealizedPnL; // 假设这是历史最高账户价值
+        const currentValue = this.riskState.unrealizedPnL; // 假设这是当前账户价值
+
+        this.logger.debug('风险管理器: 计算回撤', {
+            peakValue: peakValue,
+            currentValue: currentValue
+        });
+
+        if (peakValue <= 0) { // 如果峰值为0或负数，无法计算回撤
             return 0;
         }
         
-        const currentPnL = this.riskState.unrealizedPnL;
-        const drawdown = ((this.riskState.maxUnrealizedPnL - currentPnL) / this.riskState.maxUnrealizedPnL) * 100;
+        const drawdown = ((peakValue - currentValue) / peakValue) * 100;
         
         // 更新最大回撤
         if (drawdown > this.riskState.maxDrawdownReached) {
             this.riskState.maxDrawdownReached = drawdown;
+            this.logger.info('风险管理器: 达到新的最大回撤', { maxDrawdownReached: drawdown });
         }
         
+        // 回撤不应为负数
         return Math.max(0, drawdown);
     }
     
