@@ -10,20 +10,20 @@ module.exports = {
     quoteCurrency: 'USDT',                 // 计价货币，即用于计价的货币
 
     // 策略参数
-    riskFactor: 0.1,                       // 风险因子，控制策略的激进程度，值越大风险越高
+    riskFactor: 0.2,                       // 风险因子，控制策略的激进程度，值越大风险越高
     orderAmount: 0.04,                  // 单笔订单数量，以基础货币为单位
-    minSpread: 0.001,                      // 最小价差，低于此值不会下单
+    minSpread: 0.0011,                      // 最小价差，低于此值不会下单
     maxSpread: 0.03,                       // 最大价差，高于此值不会下单
     inventoryTarget: 0,                    // 库存目标，0表示中性，正数表示做多偏好，负数表示做空偏好
     shapeFactor: 1.0,                      // 形状因子，影响订单簿的形状，控制订单分布
 
     // 执行控制
-    updateInterval: 3000,                  // 更新间隔，策略执行频率，单位为毫秒
+    updateInterval: 5000,                  // 更新间隔，策略执行频率，单位为毫秒
     maxOrders: 10,                         // 最大订单数量，同时存在的订单上限
-    orderTimeout: 12000,                   // 订单超时时间，单位为毫秒，超时后取消订单
+    orderTimeout: 15000,                   // 订单超时时间，单位为毫秒，超时后取消订单
 
     // 风险管理 - 持仓控制
-    maxPositionValuePercent: 50.0,         // 最大持仓价值百分比，相对于账户总价值
+    maxPositionValuePercent: 20.0,         // 最大持仓价值百分比，相对于账户总价值
     targetInventory: 0,                    // 目标库存，0表示中性，正数表示做多偏好，负数表示做空偏好
 
     // 风险管理 - 止损设置
