@@ -659,16 +659,8 @@ class AvellanedaMarketMaking {
 }
 
 // 主函数
-
 async function main() {
     const strategy = new AvellanedaMarketMaking();
-    
-    // 强制退出处理
-    let forceExitTimeout = null;
-    const forceExit = () => {
-        console.log('\n🛑 强制退出程序...');
-        process.exit(1);
-    };
     
     try {
         // 初始化策略
@@ -682,97 +674,13 @@ async function main() {
         console.log('按 Ctrl+C 停止策略');
         
         // 处理进程退出信号
-        process.on('SIGINT', () => {
-            console.log('\n🛑 收到SIGINT信号，开始优雅关闭...');
-            clearTimeout(forceExitTimeout);
-            forceExitTimeout = setTimeout(forceExit, 10000); // 10秒后强制退出
-            strategy.gracefulShutdown('SIGINT');
-        });
-        
-        process.on('SIGTERM', () => {
-            console.log('\n🛑 收到SIGTERM信号，开始优雅关闭...');
-            clearTimeout(forceExitTimeout);
-            forceExitTimeout = setTimeout(forceExit, 10000); // 10秒后强制退出
-            strategy.gracefulShutdown('SIGTERM');
-        });
+        process.on('SIGINT', () => strategy.gracefulShutdown('SIGINT'));
+        process.on('SIGTERM', () => strategy.gracefulShutdown('SIGTERM'));
         
         // 处理未捕获的异常
         process.on('uncaughtException', (error) => {
             console.error('\n❌ 未捕获的异常:');
             console.error(`   错误类型: ${error.constructor.name}`);
-            console.error(`   错误信息: ${error.message}`);
-            
-            if (strategy.debugMode && error.stack) {
-                console.error('\n📚 错误堆栈:');
-                console.error(error.stack);
-            }
-            
-            clearTimeout(forceExitTimeout);
-            forceExitTimeout = setTimeout(forceExit, 5000); // 5秒后强制退出
-            strategy.gracefulShutdown('uncaughtException');
-        });
-        
-        process.on('unhandledRejection', (reason, promise) => {
-            console.error('\n❌ 未处理的Promise拒绝:');
-            console.error(`   原因: ${reason}`);
-            console.error(`   Promise: ${promise}`);
-            
-            if (strategy.debugMode && reason instanceof Error && reason.stack) {
-                console.error('\n📚 错误堆栈:');
-                console.error(reason.stack);
-            }
-            
-            clearTimeout(forceExitTimeout);
-            forceExitTimeout = setTimeout(forceExit, 5000); // 5秒后强制退出
-            strategy.gracefulShutdown('unhandledRejection');
-        });
-        
-    } catch (error) {
-        console.error('\n❌ 程序运行失败:');
-        console.error(`   错误类型: ${error.constructor.name}`);
-        console.error(`   错误信息: ${error.message}`);
-        
-        // 如果是网络连接问题，提供详细的解决建议
-        if (error.message.includes('网络连接测试失败')) {
-            console.log('\n🔧 网络连接问题解决方案:');
-            console.log('─'.repeat(50));
-            console.log('1. 检查网络连接是否正常');
-            console.log('2. 如果使用VPN，确保VPN连接稳定');
-            console.log('3. 配置代理服务器:');
-            console.log('   - 在 .env 文件中添加代理配置');
-            console.log('   - 运行 node test-network-advanced.js 测试网络');
-            console.log('4. 查看详细配置指南: docs/NETWORK_SETUP.md');
-            console.log('─'.repeat(50));
-            console.log('\n💡 建议先运行网络测试:');
-            console.log('   node test-network-advanced.js');
-        }
-        
-        // 如果是配置问题，提供配置检查建议
-        if (error.message.includes('配置验证失败') || error.message.includes('请配置有效的')) {
-            console.log('\n🔧 配置问题解决方案:');
-            console.log('─'.repeat(50));
-            console.log('1. 检查 .env 文件是否存在且格式正确');
-            console.log('2. 确保所有必需的配置项都已填写');
-            console.log('3. 验证API密钥、密钥和Passphrase是否正确');
-            console.log('4. 检查交易对格式是否正确 (如: BTC/USDT)');
-            console.log('5. 查看配置示例: env.example');
-            console.log('─'.repeat(50));
-        }
-        
-        // 如果是其他错误，提供通用调试建议
-        if (strategy.debugMode) {
-            console.log('\n🔧 调试建议:');
-            console.log('─'.repeat(50));
-            console.log('1. 启用调试模式: DEBUG=true node index.js');
-            console.log('2. 查看详细日志: logs/strategy.log');
-            console.log('3. 检查错误日志: logs/error-*.log');
-            console.log('4. 运行单元测试: node test/*.js');
-            console.log('─'.repeat(50));
-        }
-        
-        process.exit(1);
-    }
-}`);
             console.error(`   错误信息: ${error.message}`);
             
             if (strategy.debugMode && error.stack) {

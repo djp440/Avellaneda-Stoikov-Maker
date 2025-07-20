@@ -178,11 +178,10 @@ class NetworkManager extends EventEmitter {
     /**
      * 测试单个连接
      */
-    
     async testConnection(url) {
         return new Promise((resolve) => {
             const startTime = Date.now();
-            const timeout = Math.min(this.connectionConfig.timeout, 5000); // 最大5秒超时
+            const timeout = this.connectionConfig.timeout;
             
             const options = {
                 hostname: new URL(url).hostname,
@@ -209,20 +208,7 @@ class NetworkManager extends EventEmitter {
             }
             
             const client = url.startsWith('https') ? https : http;
-            
-            // 添加连接超时
-            const connectionTimeout = setTimeout(() => {
-                req.destroy();
-                resolve({
-                    url,
-                    success: false,
-                    latency: timeout,
-                    error: 'connection_timeout'
-                });
-            }, timeout);
-            
             const req = client.request(options, (res) => {
-                clearTimeout(connectionTimeout);
                 const endTime = Date.now();
                 const latency = endTime - startTime;
                 
@@ -235,7 +221,6 @@ class NetworkManager extends EventEmitter {
             });
             
             req.on('error', (error) => {
-                clearTimeout(connectionTimeout);
                 const endTime = Date.now();
                 const latency = endTime - startTime;
                 
@@ -248,7 +233,6 @@ class NetworkManager extends EventEmitter {
             });
             
             req.on('timeout', () => {
-                clearTimeout(connectionTimeout);
                 req.destroy();
                 resolve({
                     url,

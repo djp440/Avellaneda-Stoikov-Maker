@@ -257,101 +257,24 @@ class AvellanedaStrategy {
     /**
      * 停止策略
      */
-    
     async stop() {
         try {
-            if (!this.isRunning || this.isShuttingDown) {
-                this.logger.warn('策略未在运行或正在关闭中');
-                console.log('⚠️ 策略未在运行或正在关闭中');
-                return;
-            }
-
-            this.isShuttingDown = true;
-            console.log('\n🛑 开始停止策略...\n');
-            this.logger.info('停止策略');
-
-            // 停止健康检查
-            console.log('💓 停止健康检查...');
-            this.stopHealthCheck();
-            console.log('✅ 健康检查已停止');
-
-            // 停止策略
-            if (this.strategy) {
-                console.log('🎯 停止策略算法...');
-                await this.strategy.stop();
-                console.log('✅ 策略算法已停止');
-            }
-
-            // 清理交易所连接
-            if (this.exchangeManager) {
-                console.log('🏢 清理交易所连接...');
-                await this.exchangeManager.close();
-                console.log('✅ 交易所连接已清理');
-            }
-
-            // 清理网络管理器
-            if (this.networkManager) {
-                console.log('🌐 清理网络管理器...');
-                this.networkManager.close();
-                console.log('✅ 网络管理器已清理');
-            }
-
-            // 标记为停止状态
             this.isRunning = false;
-            this.isShuttingDown = false;
-
-            // 记录策略状态
-            const uptime = this.startTime ? Date.now() - this.startTime : 0;
-            this.logger.strategyStatus('stopped', {
-                timestamp: new Date().toISOString(),
-                uptime: uptime
-            });
-
-            console.log('\n✅ 策略停止成功！');
-            console.log('─'.repeat(40));
-            console.log(`📅 停止时间: ${new Date().toLocaleString('zh-CN')}`);
-            console.log(`⏱️ 运行时长: ${Math.round(uptime / 1000)}秒`);
-            console.log('─'.repeat(40) + '\n');
             
-            this.logger.info('策略停止成功');
-
+            // 停止风险管理器
+            this.riskManager.cleanup();
+            
+            // 取消所有活跃订单
+            await this.cancelAllOrders();
+            
+            // 关闭交易所连接
+            await this.exchangeManager.close();
+            
+            this.logger.info('策略已停止');
+            return true;
         } catch (error) {
-            this.logger.errorWithStack('策略停止失败', error);
-            
-            console.error('\n❌ 策略停止失败:');
-            console.error(`   错误类型: ${error.constructor.name}`);
-            console.error(`   错误信息: ${error.message}`);
-            
-            if (this.debugMode && error.stack) {
-                console.error('\n📚 错误堆栈:');
-                console.error(error.stack);
-            }
-            
-            // 强制清理
-            this.forceCleanup();
-            
-            throw error;
-        }
-    }
-
-    /**
-     * 强制清理资源
-     */
-    forceCleanup() {
-        try {
-            // 强制停止所有定时器
-            if (this.healthCheckInterval) {
-                clearInterval(this.healthCheckInterval);
-                this.healthCheckInterval = null;
-            }
-            
-            // 强制停止策略
-            this.isRunning = false;
-            this.isShuttingDown = false;
-            
-            console.log('🧹 强制清理完成');
-        } catch (error) {
-            console.error('❌ 强制清理失败:', error.message);
+            this.logger.error('策略停止失败', error);
+            return false;
         }
     }
 
@@ -359,18 +282,8 @@ class AvellanedaStrategy {
      * 主循环
      */
     async mainLoop() {
-        const loopTimeout = 30000; // 30秒超时
-        let lastLoopTime = Date.now();
-        
         while (this.isRunning) {
             try {
-                // 检查循环超时
-                const currentTime = Date.now();
-                if (currentTime - lastLoopTime > loopTimeout) {
-                    this.logger.warn('主循环超时，重新开始循环');
-                    lastLoopTime = currentTime;
-                }
-                
                 // 检查风险状态
                 const riskStatus = this.riskManager.getRiskStatus();
                 if (riskStatus.state.isEmergencyStop) {
@@ -386,9 +299,6 @@ class AvellanedaStrategy {
                 } else {
                     this.logger.debug('技术指标尚未准备就绪', this.indicators.getStatus());
                 }
-                
-                // 更新循环时间
-                lastLoopTime = Date.now();
                 
                 // 等待下一次更新
                 await this.sleep(this.config.get('updateInterval') || 1000);

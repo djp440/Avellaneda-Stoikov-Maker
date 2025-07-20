@@ -350,7 +350,6 @@ class ExchangeManager extends EventEmitter {
     /**
      * 更新订单簿
      */
-    
     async updateOrderBook() {
         try {
             if (!this.isConnected || !this.exchange) {
@@ -358,14 +357,7 @@ class ExchangeManager extends EventEmitter {
             }
 
             const symbol = this.config.get('symbol');
-            
-            // 添加超时保护
-            const orderBookPromise = this.exchange.fetchOrderBook(symbol);
-            const timeoutPromise = new Promise((_, reject) => {
-                setTimeout(() => reject(new Error('Order book fetch timeout')), 10000);
-            });
-            
-            const orderBook = await Promise.race([orderBookPromise, timeoutPromise]);
+            const orderBook = await this.exchange.fetchOrderBook(symbol);
             
             // 验证订单簿数据
             if (!orderBook || !orderBook.bids || !orderBook.asks) {
