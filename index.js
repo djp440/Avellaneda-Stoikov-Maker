@@ -228,16 +228,12 @@ class AvellanedaMarketMaking {
      */
     async initializeStrategy() {
         try {
-            if (this.debugMode) {
-                console.log('   正在创建策略实例...');
-            }
+            console.log('   initializeStrategy: 开始创建策略实例...');
             
             // 创建策略实例，传递配置管理器实例
             this.strategy = new AvellanedaStrategy(this.config);
             
-            if (this.debugMode) {
-                console.log('   正在初始化策略组件...');
-            }
+            console.log('   initializeStrategy: 策略实例创建完成，开始初始化策略组件...');
             
             // 初始化策略
             const initialized = await this.strategy.initialize();
@@ -249,9 +245,11 @@ class AvellanedaMarketMaking {
                 strategyClass: this.strategy.constructor.name,
                 timestamp: new Date().toISOString()
             });
+            console.log('   initializeStrategy: 策略算法初始化成功');
             
         } catch (error) {
             this.logger.error('策略算法初始化失败', error);
+            console.error('   initializeStrategy: 策略算法初始化失败:', error.message);
             throw error;
         }
     }
@@ -374,12 +372,14 @@ class AvellanedaMarketMaking {
      * 启动策略
      */
     async start() {
+        console.log('start函数开始执行');
         try {
             if (this.isRunning) {
                 this.logger.warn('策略已在运行中');
                 console.log('⚠️ 策略已在运行中');
                 return;
             }
+            console.log('start函数：策略未运行，继续启动流程');
 
             console.log('🚀 开始启动策略...\n');
             this.logger.info('启动策略');
@@ -688,6 +688,7 @@ class AvellanedaMarketMaking {
 // 主函数
 
 async function main() {
+    console.log('main函数开始执行');
     const strategy = new AvellanedaMarketMaking();
     
     // 强制退出处理
@@ -698,11 +699,15 @@ async function main() {
     };
     
     try {
+        console.log('调用 strategy.initialize()...');
         // 初始化策略
         await strategy.initialize();
+        console.log('strategy.initialize() 完成');
         
+        console.log('调用 strategy.start()...');
         // 启动策略
         await strategy.start();
+        console.log('strategy.start() 完成');
         
         // 保持程序运行
         console.log('📊 策略正在运行中...');

@@ -198,34 +198,49 @@ class AvellanedaStrategy {
      * 初始化策略
      */
     async initialize() {
+        console.log('AvellanedaStrategy: initialize() 开始');
         try {
             this.logger.info('正在初始化策略');
             
+            console.log('AvellanedaStrategy: initialize() - 初始化交易所连接...');
             // 初始化交易所连接
             const exchangeInitialized = await this.exchangeManager.initialize();
             if (!exchangeInitialized) {
+                console.error('AvellanedaStrategy: initialize() - 交易所连接初始化失败');
                 throw new Error('Failed to initialize exchange connection');
             }
+            console.log('AvellanedaStrategy: initialize() - 交易所连接初始化完成');
             
             // 技术指标管理器不需要显式初始化，在构造函数中已经初始化
             
+            console.log('AvellanedaStrategy: initialize() - 初始化风险管理器...');
             // 初始化风险管理器
             const riskInitialized = await this.riskManager.initialize();
             if (!riskInitialized) {
+                console.error('AvellanedaStrategy: initialize() - 风险管理器初始化失败');
                 throw new Error('Failed to initialize risk manager');
             }
+            console.log('AvellanedaStrategy: initialize() - 风险管理器初始化完成');
             
+            console.log('AvellanedaStrategy: initialize() - 同步活跃订单...');
             // 挂单同步
             await this.syncActiveOrdersFromExchange();
+            console.log('AvellanedaStrategy: initialize() - 活跃订单同步完成');
             
             // 标记为已初始化
             this.isInitialized = true;
             
             this.logger.info('策略初始化成功');
+            console.log('AvellanedaStrategy: initialize() 成功完成');
             return true;
             
         } catch (error) {
-            this.logger.error('策略初始化失败', error);
+            this.logger.error('策略初始化失败', {
+                errorName: error.name,
+                errorMessage: error.message,
+                stack: error.stack
+            });
+            console.error('AvellanedaStrategy: initialize() 失败:', error.message);
             return false;
         }
     }
@@ -262,20 +277,31 @@ class AvellanedaStrategy {
      * 启动策略
      */
     async start() {
+        console.log('AvellanedaStrategy: start() 开始');
         try {
             if (!this.isInitialized) {
+                console.error('AvellanedaStrategy: start() - 策略未初始化');
                 throw new Error('Strategy not initialized');
             }
             
             this.isRunning = true;
             this.logger.info('策略已启动');
+            console.log('AvellanedaStrategy: start() - 策略已启动');
             
+            console.log('AvellanedaStrategy: start() - 开始主循环...');
             // 开始主循环
             this.mainLoop();
+            console.log('AvellanedaStrategy: start() - 主循环已启动');
             
+            console.log('AvellanedaStrategy: start() 成功完成');
             return true;
         } catch (error) {
-            this.logger.error('策略启动失败', error);
+            this.logger.error('策略启动失败', {
+                errorName: error.name,
+                errorMessage: error.message,
+                stack: error.stack
+            });
+            console.error('AvellanedaStrategy: start() 失败:', error.message);
             return false;
         }
     }
@@ -385,45 +411,61 @@ class AvellanedaStrategy {
      * 主循环
      */
     async mainLoop() {
+        console.log('AvellanedaStrategy: mainLoop() 开始');
         const loopTimeout = 30000; // 30秒超时
         let lastLoopTime = Date.now();
         while (this.isRunning) {
             try {
+                console.log(`AvellanedaStrategy: mainLoop() - 循环开始 (上次循环时间: ${new Date(lastLoopTime).toISOString()})`);
                 const loopPromise = (async () => {
                     // 检查循环超时
                     const currentTime = Date.now();
                     if (currentTime - lastLoopTime > loopTimeout) {
                         this.logger.warn('主循环超时，重新开始循环');
+                        console.warn('AvellanedaStrategy: mainLoop() - 主循环超时，重新开始循环');
                         lastLoopTime = currentTime;
                     }
                     // 检查风险状态
                     const riskStatus = this.riskManager.getRiskStatus();
                     if (riskStatus.state.isEmergencyStop) {
                         this.logger.warn('策略因紧急停止而暂停');
+                        console.warn('AvellanedaStrategy: mainLoop() - 策略因紧急停止而暂停');
                         await this.sleep(10000); // 紧急停止时等待更长时间
                         return;
                     }
                     // 检查指标是否准备就绪
                     if (this.indicators.isReady()) {
+                        console.log('AvellanedaStrategy: mainLoop() - 指标已准备就绪，执行策略...');
                         await this.executeStrategy();
+                        console.log('AvellanedaStrategy: mainLoop() - 策略执行完成');
                     } else {
                         this.logger.debug('技术指标尚未准备就绪', this.indicators.getStatus());
+                        console.log('AvellanedaStrategy: mainLoop() - 技术指标尚未准备就绪');
                     }
                     lastLoopTime = Date.now();
                 })();
                 // 增加超时保护，防止单次循环卡死
                 await Promise.race([
                     loopPromise,
-                    this.sleep(loopTimeout).then(() => {
+                    this.sleep(loopTimeout + 1000).then(() => { // 增加一点缓冲时间
                         this.logger.error('主循环单次迭代超时，强制跳过');
+                        console.error('AvellanedaStrategy: mainLoop() - 主循环单次迭代超时，强制跳过');
                     })
                 ]);
-                await this.sleep(this.config.get('updateInterval') || 1000);
+                const updateInterval = this.config.get('updateInterval') || 1000;
+                console.log(`AvellanedaStrategy: mainLoop() - 等待 ${updateInterval}ms 后进行下一次循环`);
+                await this.sleep(updateInterval);
             } catch (error) {
-                this.logger.error('主循环执行出错', error);
+                this.logger.error('主循环执行出错', {
+                    errorName: error.name,
+                    errorMessage: error.message,
+                    stack: error.stack
+                });
+                console.error('AvellanedaStrategy: mainLoop() - 主循环执行出错:', error.message);
                 await this.sleep(5000); // 错误时等待更长时间
             }
         }
+        console.log('AvellanedaStrategy: mainLoop() 停止');
     }
 
     /**
