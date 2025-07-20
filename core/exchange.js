@@ -665,9 +665,13 @@ class ExchangeManager extends EventEmitter {
             return amount;
         }
 
-        const amountPrecision = this.marketInfo.precision.amount;
-        if (amountPrecision !== undefined) {
-            return parseFloat(amount.toFixed(amountPrecision));
+        // CCXT返回的amount是最小数量，不是精度位数
+        // 我们需要根据最小数量计算精度位数
+        const minAmount = this.marketInfo.precision.amount;
+        if (minAmount !== undefined && minAmount > 0) {
+            // 计算精度位数：例如 0.000001 -> 6位小数
+            const precision = Math.abs(Math.floor(Math.log10(minAmount)));
+            return parseFloat(amount.toFixed(precision));
         }
 
         return amount;

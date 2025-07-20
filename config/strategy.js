@@ -125,6 +125,12 @@ class StrategyConfig {
             orderTimeout: this.parseInt(process.env.ORDER_TIMEOUT, 30000),
             filledOrderDelay: this.parseInt(process.env.FILLED_ORDER_DELAY, 1000),
 
+            // 技术指标配置
+            volatilityBufferSize: this.parseInt(process.env.VOLATILITY_BUFFER_SIZE, 20),
+            volatilityAlpha: this.parseFloat(process.env.VOLATILITY_ALPHA, 0.94),
+            tradingIntensityBufferSize: this.parseInt(process.env.TRADING_INTENSITY_BUFFER_SIZE, 20),
+            orderBookDepth: this.parseInt(process.env.ORDER_BOOK_DEPTH, 10),
+
             // 风险管理
             maxPositionSizePercent: this.parseFloat(process.env.MAX_POSITION_SIZE_PERCENT, 10.0),
             maxPositionValuePercent: this.parseFloat(process.env.MAX_POSITION_VALUE_PERCENT, 50.0),

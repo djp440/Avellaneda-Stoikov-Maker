@@ -1,4 +1,4 @@
-const AvellanedaMarketMaking = require('./index');
+const AvellanedaMarketMaking = require('../index');
 
 /**
  * 测试策略启动时的网络连接测试功能

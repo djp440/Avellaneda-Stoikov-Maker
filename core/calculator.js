@@ -223,7 +223,7 @@ class AvellanedaCalculator {
      * @param {number} targetInventory - 目标库存
      * @param {number} totalInventory - 总库存价值
      * @param {boolean} isBuy - 是否为买单
-     * @returns {number} 最终订单数量
+     * @returns {number} 计算后的订单数量
      */
     calculateOrderAmount(baseAmount, currentInventory, targetInventory, totalInventory, isBuy) {
         try {
@@ -242,6 +242,18 @@ class AvellanedaCalculator {
             
             // 格式化数量
             const finalAmount = this.formatAmount(adjustedAmount);
+            
+            // 打印详细的订单数量计算过程
+            this.printOrderAmountCalculation({
+                baseAmount,
+                currentInventory,
+                targetInventory,
+                totalInventory,
+                inventorySkew,
+                isBuy,
+                adjustedAmount,
+                finalAmount
+            });
             
             this.logger.debug('Order amount calculated', {
                 baseAmount,
@@ -262,14 +274,95 @@ class AvellanedaCalculator {
     }
 
     /**
+     * 打印订单数量计算详情
+     */
+    printOrderAmountCalculation(data) {
+        const {
+            baseAmount,
+            currentInventory,
+            targetInventory,
+            totalInventory,
+            inventorySkew,
+            isBuy,
+            adjustedAmount,
+            finalAmount
+        } = data;
+        
+        console.log(`\n📦 ${isBuy ? '买单' : '卖单'}数量计算:`);
+        console.log('─'.repeat(40));
+        
+        console.log('📊 基础参数:');
+        console.log(`   基础数量: ${baseAmount.toFixed(8)} BTC`);
+        console.log(`   当前库存: ${currentInventory.toFixed(8)} BTC`);
+        console.log(`   目标库存: ${targetInventory.toFixed(8)} BTC`);
+        console.log(`   总库存价值: ${totalInventory.toFixed(2)} USDT`);
+        
+        console.log('\n🎯 库存偏差:');
+        console.log(`   偏差值: ${inventorySkew.toFixed(6)}`);
+        console.log(`   偏差百分比: ${(inventorySkew * 100).toFixed(4)}%`);
+        
+        console.log('\n🔧 形状因子调整:');
+        console.log(`   形状因子(η): ${this.eta}`);
+        console.log(`   调整前数量: ${baseAmount.toFixed(8)} BTC`);
+        
+        // 计算调整因子
+        let adjustmentFactor = 1;
+        if (isBuy && inventorySkew > 0) {
+            adjustmentFactor = Math.exp(-this.eta * inventorySkew);
+            console.log(`   调整因子: exp(-${this.eta} × ${inventorySkew.toFixed(6)}) = ${adjustmentFactor.toFixed(6)}`);
+        } else if (!isBuy && inventorySkew < 0) {
+            adjustmentFactor = Math.exp(this.eta * inventorySkew);
+            console.log(`   调整因子: exp(${this.eta} × ${inventorySkew.toFixed(6)}) = ${adjustmentFactor.toFixed(6)}`);
+        } else {
+            console.log(`   调整因子: 1.000000 (无需调整)`);
+        }
+        
+        console.log(`   调整后数量: ${adjustedAmount.toFixed(8)} BTC`);
+        
+        console.log('\n📏 数量限制:');
+        const maxPosition = this.config.get('maxPosition') || 1.0;
+        console.log(`   最大持仓限制: ${maxPosition.toFixed(8)} BTC`);
+        console.log(`   限制后数量: ${adjustedAmount.toFixed(8)} BTC`);
+        
+        console.log('\n🎯 最终结果:');
+        console.log(`   格式化数量: ${finalAmount.toFixed(8)} BTC`);
+        console.log(`   订单价值: ${(finalAmount * (isBuy ? this.optimalBid : this.optimalAsk)).toFixed(2)} USDT`);
+        
+        console.log('─'.repeat(40));
+    }
+
+    /**
      * 格式化订单数量
      * @param {number} amount - 原始数量
      * @returns {number} 格式化后的数量
      */
     formatAmount(amount) {
         try {
-            const precision = this.config.get('amountPrecision') || 8;
-            return Math.floor(amount * Math.pow(10, precision)) / Math.pow(10, precision);
+            // 获取市场精度信息
+            const precision = this.config.get('amountPrecision') || 6; // 默认6位精度
+            const minAmount = Math.pow(10, -precision); // 最小数量
+            
+            // 确保数量不小于最小数量
+            if (amount < minAmount) {
+                this.logger.warn('订单数量小于最小数量，使用最小数量', {
+                    originalAmount: amount,
+                    minAmount: minAmount,
+                    precision: precision
+                });
+                amount = minAmount;
+            }
+            
+            // 格式化到指定精度
+            const formattedAmount = Math.floor(amount * Math.pow(10, precision)) / Math.pow(10, precision);
+            
+            this.logger.debug('订单数量格式化', {
+                originalAmount: amount,
+                formattedAmount: formattedAmount,
+                precision: precision,
+                minAmount: minAmount
+            });
+            
+            return formattedAmount;
         } catch (error) {
             this.logger.error('Error formatting amount', error);
             return amount;
@@ -314,10 +407,11 @@ class AvellanedaCalculator {
      * @param {Object} marketData - 市场数据
      * @param {Object} indicators - 技术指标
      * @param {Object} balances - 账户余额
+     * @returns {Object} 计算器状态
      */
     updateState(marketData, indicators, balances) {
         try {
-            const { midPrice } = marketData;
+            const { midPrice, timestamp } = marketData;
             const { volatility, tradingIntensity } = indicators;
             const { baseAmount, quoteAmount } = balances;
             
@@ -327,40 +421,104 @@ class AvellanedaCalculator {
             // 计算目标库存
             const targetInventory = this.calculateTargetInventory(inventoryValue.totalValue, midPrice);
             
-            // 计算最优价差
-            this.optimalSpread = this.calculateOptimalSpread(volatility, tradingIntensity);
-            
-            // 计算最优价格
-            const optimalPrices = this.calculateOptimalPrices(midPrice, this.optimalSpread);
-            this.optimalBid = optimalPrices.optimalBid;
-            this.optimalAsk = optimalPrices.optimalAsk;
-            
             // 计算库存偏差
             const inventorySkew = this.calculateInventorySkew(baseAmount, targetInventory, inventoryValue.totalValue);
             
-            this.logger.info('Calculator state updated', {
+            // 计算最优价差
+            const optimalSpread = this.calculateOptimalSpread(volatility, tradingIntensity);
+            
+            // 计算最优价格
+            const { optimalBid, optimalAsk } = this.calculateOptimalPrices(midPrice, optimalSpread);
+            
+            // 打印详细的计算过程
+            this.printCalculationDetails({
                 midPrice,
                 volatility,
                 tradingIntensity,
-                optimalSpread: this.optimalSpread,
-                optimalBid: this.optimalBid,
-                optimalAsk: this.optimalAsk,
+                baseAmount,
+                quoteAmount,
+                inventoryValue,
+                targetInventory,
                 inventorySkew,
-                targetInventory
+                optimalSpread,
+                optimalBid,
+                optimalAsk
             });
             
+            // 更新状态
+            this.reservationPrice = midPrice;
+            this.optimalSpread = optimalSpread;
+            this.optimalBid = optimalBid;
+            this.optimalAsk = optimalAsk;
+            
             return {
-                optimalSpread: this.optimalSpread,
-                optimalBid: this.optimalBid,
-                optimalAsk: this.optimalAsk,
+                optimalBid,
+                optimalAsk,
+                optimalSpread,
                 inventorySkew,
                 targetInventory,
                 inventoryValue
             };
+            
         } catch (error) {
-            this.logger.error('Error updating calculator state', error);
+            this.logger.error('更新计算器状态失败', error);
             return null;
         }
+    }
+
+    /**
+     * 打印详细的计算过程
+     */
+    printCalculationDetails(data) {
+        const {
+            midPrice,
+            volatility,
+            tradingIntensity,
+            baseAmount,
+            quoteAmount,
+            inventoryValue,
+            targetInventory,
+            inventorySkew,
+            optimalSpread,
+            optimalBid,
+            optimalAsk
+        } = data;
+        
+        console.log('\n🧮 参数计算详情:');
+        console.log('─'.repeat(50));
+        
+        console.log('📊 输入参数:');
+        console.log(`   中间价: ${midPrice.toFixed(2)} USDT`);
+        console.log(`   波动率: ${(volatility * 100).toFixed(4)}%`);
+        console.log(`   交易强度: ${tradingIntensity.toFixed(6)}`);
+        console.log(`   基础余额: ${baseAmount.toFixed(8)} BTC`);
+        console.log(`   计价余额: ${quoteAmount.toFixed(2)} USDT`);
+        
+        console.log('\n💰 库存价值计算:');
+        console.log(`   基础货币价值: ${inventoryValue.baseValue.toFixed(2)} USDT`);
+        console.log(`   计价货币价值: ${inventoryValue.quoteValue.toFixed(2)} USDT`);
+        console.log(`   总价值: ${inventoryValue.totalValue.toFixed(2)} USDT`);
+        
+        console.log('\n🎯 库存管理:');
+        console.log(`   当前库存: ${baseAmount.toFixed(8)} BTC`);
+        console.log(`   目标库存: ${targetInventory.toFixed(8)} BTC`);
+        console.log(`   库存偏差: ${(inventorySkew * 100).toFixed(4)}%`);
+        
+        console.log('\n📈 最优价差计算:');
+        console.log(`   风险因子(γ): ${this.gamma}`);
+        console.log(`   形状因子(η): ${this.eta}`);
+        console.log(`   时间项: ${(this.gamma * Math.pow(volatility, 2) * 0).toFixed(6)}`);
+        console.log(`   强度项: ${((2 / this.gamma) * Math.log(1 + this.gamma / tradingIntensity)).toFixed(6)}`);
+        console.log(`   最优价差: ${optimalSpread.toFixed(6)}`);
+        console.log(`   价差百分比: ${(optimalSpread / midPrice * 100).toFixed(4)}%`);
+        
+        console.log('\n💱 最优价格计算:');
+        console.log(`   价差的一半: ${(optimalSpread / 2).toFixed(6)}`);
+        console.log(`   最优买价: ${optimalBid.toFixed(2)} USDT`);
+        console.log(`   最优卖价: ${optimalAsk.toFixed(2)} USDT`);
+        console.log(`   价格差: ${(optimalAsk - optimalBid).toFixed(2)} USDT`);
+        
+        console.log('─'.repeat(50));
     }
 
     /**

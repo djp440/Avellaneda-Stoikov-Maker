@@ -1,5 +1,5 @@
-const NetworkManager = require('./core/network-manager');
-const StrategyConfig = require('./config/strategy');
+const NetworkManager = require('../core/network-manager');
+const StrategyConfig = require('../config/strategy');
 
 /**
  * 高级网络连接测试
