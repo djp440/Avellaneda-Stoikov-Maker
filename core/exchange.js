@@ -558,16 +558,28 @@ class ExchangeManager extends EventEmitter {
                 status: order.status
             });
 
+            this.logger.info('订单创建成功并触发更新事件', {
+                id: order.id,
+                symbol: order.symbol,
+                side: order.side,
+                type: order.type,
+                amount: order.amount,
+                price: order.price,
+                status: order.status,
+                clientOrderId: order.clientOrderId
+            });
             this.emit('orderUpdate', order);
             return order;
             
         } catch (error) {
-            this.logger.error('Failed to create order', {
+            this.logger.error('创建订单失败', {
                 side,
                 amount,
                 price,
                 type,
-                error: error.message
+                errorName: error.name,
+                errorMessage: error.message,
+                stack: error.stack
             });
             throw error;
         }

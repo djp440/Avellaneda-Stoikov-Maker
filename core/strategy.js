@@ -652,19 +652,27 @@ class AvellanedaStrategy {
      * 更新订单
      */
     async updateOrders() {
+        this.logger.info('开始执行 updateOrders 流程');
         try {
             console.log('🔄 正在更新订单...');
             
             // 取消现有订单
+            this.logger.info('调用 cancelActiveOrders 取消现有订单');
             await this.cancelActiveOrders();
             
             // 创建新订单
+            this.logger.info('调用 createOrders 创建新订单');
             await this.createOrders();
             
             this.lastUpdateTime = Date.now();
+            this.logger.info('订单更新流程完成', { lastUpdateTime: new Date(this.lastUpdateTime).toISOString() });
             
         } catch (error) {
-            this.logger.error('更新订单失败', error);
+            this.logger.error('更新订单失败', {
+                errorName: error.name,
+                errorMessage: error.message,
+                stack: error.stack
+            });
         }
     }
 
@@ -838,10 +846,11 @@ class AvellanedaStrategy {
      */
     async createOrder(side, amount, price, clientOrderId, maxRetries = 3, timeout = 5000) {
         let attempt = 0;
+        this.logger.info('尝试创建单个订单', { side, amount, price, clientOrderId, maxRetries, timeout });
         while (attempt < maxRetries) {
             try {
-                console.log(`   🔧 正在创建${side === 'buy' ? '买单' : '卖单'}... (第${attempt + 1}次尝试, ClientOrderID: ${clientOrderId})`);
-                console.log(`      参数: ${side} ${amount} BTC @ ${price} USDT`);
+                this.logger.debug(`正在创建${side === 'buy' ? '买单' : '卖单'}... (第${attempt + 1}次尝试, ClientOrderID: ${clientOrderId})`);
+                this.logger.debug(`参数: ${side} ${amount} BTC @ ${price} USDT`);
 
                 // 尝试下单
                 const orderPromise = this.exchangeManager.createOrder(side, amount, price, 'limit', { clientOrderId });
@@ -940,17 +949,43 @@ class AvellanedaStrategy {
     handleOrderUpdate(order) {
         try {
             const orderId = order.id;
-            
+            this.logger.info('收到订单更新', {
+                id: order.id,
+                status: order.status,
+                side: order.side,
+                amount: order.amount,
+                filled: order.filled,
+                remaining: order.remaining,
+                clientOrderId: order.clientOrderId
+            });
+
             // 更新活跃订单
             if (this.activeOrders.has(orderId)) {
-                this.activeOrders.set(orderId, order);
+                const existingOrder = this.activeOrders.get(orderId);
+                // 仅当新状态更“终结”时才更新，避免旧状态覆盖新状态
+                if (this.isNewOrderStatusMoreFinal(existingOrder.status, order.status)) {
+                    this.activeOrders.set(orderId, order);
+                    this.logger.debug('活跃订单状态已更新', { id: order.id, oldStatus: existingOrder.status, newStatus: order.status });
+                } else {
+                    this.logger.debug('活跃订单状态未更新 (新状态不更终结)', { id: order.id, oldStatus: existingOrder.status, newStatus: order.status });
+                }
                 
                 // 检查订单状态
                 if (order.status === 'filled') {
+                    this.logger.info('订单已成交，调用 handleOrderFilled', { id: order.id });
                     this.handleOrderFilled(order);
-                } else if (order.status === 'canceled') {
+                } else if (order.status === 'canceled' || order.status === 'rejected' || order.status === 'expired') {
+                    this.logger.info('订单已取消/拒绝/过期，从活跃订单中移除', { id: order.id, status: order.status });
                     this.activeOrders.delete(orderId);
+                } else if (order.status === 'open' && !this.activeOrders.has(orderId)) {
+                    // 如果是新收到的open订单，且本地没有，则添加
+                    this.activeOrders.set(orderId, order);
+                    this.logger.info('新开放订单已添加到活跃订单列表', { id: order.id });
                 }
+            } else if (order.status === 'open' || order.status === 'partially_filled') {
+                // 如果本地没有此订单，且状态是open或partially_filled，则添加
+                this.activeOrders.set(orderId, order);
+                this.logger.info('新订单已添加到活跃订单列表', { id: order.id, status: order.status });
             }
             
             // 记录订单历史
@@ -958,10 +993,32 @@ class AvellanedaStrategy {
                 ...order,
                 timestamp: Date.now()
             });
+            this.logger.debug('订单已添加到历史记录', { id: order.id, historySize: this.orderHistory.length });
             
         } catch (error) {
-            this.logger.error('Failed to handle order update', error);
+            this.logger.error('处理订单更新时出错', {
+                orderId: order ? order.id : 'N/A',
+                errorName: error.name,
+                errorMessage: error.message,
+                stack: error.stack
+            });
         }
+    }
+
+    /**
+     * 辅助函数：判断新订单状态是否比旧状态更“终结”
+     * 用于避免旧的或不完整的状态更新覆盖新的、更准确的状态
+     */
+    isNewOrderStatusMoreFinal(oldStatus, newStatus) {
+        const statusPrecedence = {
+            'open': 1,
+            'partially_filled': 2,
+            'canceled': 3,
+            'rejected': 3,
+            'expired': 3,
+            'filled': 4
+        };
+        return (statusPrecedence[newStatus] || 0) >= (statusPrecedence[oldStatus] || 0);
     }
 
     /**
@@ -969,30 +1026,48 @@ class AvellanedaStrategy {
      */
     handleOrderFilled(order) {
         try {
-            this.logger.info('Order filled', {
+            this.logger.info('订单已成交', {
                 id: order.id,
                 side: order.side,
                 amount: order.amount,
                 price: order.price,
-                cost: order.cost
+                cost: order.cost,
+                filled: order.filled,
+                remaining: order.remaining,
+                clientOrderId: order.clientOrderId
             });
             
             // 从活跃订单中移除
-            this.activeOrders.delete(order.id);
+            if (this.activeOrders.has(order.id)) {
+                this.activeOrders.delete(order.id);
+                this.logger.debug('已成交订单从活跃订单列表中移除', { id: order.id });
+            } else {
+                this.logger.warn('尝试移除已成交订单，但该订单不在活跃订单列表中', { id: order.id });
+            }
             
             // 更新已实现盈亏（这里简化处理，实际应该根据成本价计算）
             const realizedPnL = this.calculateRealizedPnL(order);
             this.riskManager.updateRealizedPnL(realizedPnL);
+            this.logger.info('已实现盈亏已更新', { orderId: order.id, realizedPnL: realizedPnL });
             
             // 延迟创建新订单
-            setTimeout(() => {
+            this.logger.info(`订单成交后延迟 ${this.filledOrderDelay} 秒，然后更新订单`);
+            setTimeout(async () => {
                 if (this.isRunning) {
-                    this.updateOrders();
+                    this.logger.info('延迟结束，开始更新订单...');
+                    await this.updateOrders();
+                } else {
+                    this.logger.warn('策略未运行，跳过延迟后的订单更新');
                 }
             }, this.filledOrderDelay * 1000);
             
         } catch (error) {
-            this.logger.error('Failed to handle order filled', error);
+            this.logger.error('处理订单成交时出错', {
+                orderId: order ? order.id : 'N/A',
+                errorName: error.name,
+                errorMessage: error.message,
+                stack: error.stack
+            });
         }
     }
     
