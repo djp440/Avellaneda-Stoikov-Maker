@@ -519,7 +519,7 @@ class ExchangeManager extends EventEmitter {
     /**
      * 创建订单
      */
-    async createOrder(side, amount, price, type = 'limit') {
+    async createOrder(side, amount, price, type = 'limit', params = {}) {
         try {
             if (!this.isConnected || !this.exchange) {
                 throw new Error('Exchange not connected');
@@ -531,8 +531,10 @@ class ExchangeManager extends EventEmitter {
             const formattedPrice = this.formatPrice(price);
             const formattedAmount = this.formatAmount(amount);
 
+            // 优先使用传入的 clientOrderId，否则生成新的
             const orderParams = {
-                clientOrderId: Helpers.generateUniqueId()
+                ...params,
+                clientOrderId: params.clientOrderId || Helpers.generateUniqueId()
             };
 
             let order;
@@ -619,6 +621,37 @@ class ExchangeManager extends EventEmitter {
         } catch (error) {
             this.logger.error('Failed to get order', {
                 orderId,
+                symbol,
+                error: error.message
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * 通过 clientOrderId 获取订单信息
+     */
+    async getOrderByClientOrderId(clientOrderId, symbol = null) {
+        try {
+            if (!this.isConnected || !this.exchange) {
+                throw new Error('Exchange not connected');
+            }
+
+            const orderSymbol = symbol || this.config.get('symbol');
+            // 检查交易所是否支持 fetchOrderByClientId
+            if (this.exchange.has['fetchOrderByClientId']) {
+                const order = await this.exchange.fetchOrderByClientId(clientOrderId, orderSymbol);
+                return order;
+            } else {
+                // 如果不支持，尝试获取所有订单并过滤
+                this.logger.warn('交易所不支持 fetchOrderByClientId，尝试获取所有订单并过滤');
+                const openOrders = await this.exchange.fetchOpenOrders(orderSymbol);
+                return openOrders.find(order => order.clientOrderId === clientOrderId);
+            }
+            
+        } catch (error) {
+            this.logger.error('Failed to get order by clientOrderId', {
+                clientOrderId,
                 symbol,
                 error: error.message
             });

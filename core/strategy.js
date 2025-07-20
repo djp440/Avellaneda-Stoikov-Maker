@@ -739,12 +739,14 @@ class AvellanedaStrategy {
                     const buyValidation = this.riskManager.validateOrder('buy', buyAmount, optimalBid);
                     if (buyValidation.valid) {
                         console.log('   ✅ 风险验证通过');
-                        const buyOrder = await this.createOrder('buy', buyAmount, optimalBid);
+                        const buyClientOrderId = Helpers.generateUniqueId(); // 生成唯一的 clientOrderId
+                        const buyOrder = await this.createOrder('buy', buyAmount, optimalBid, buyClientOrderId);
                         if (buyOrder) {
                             this.activeOrders.set(buyOrder.id, buyOrder);
                             console.log(`   ✅ 买单创建成功 - ID: ${buyOrder.id}`);
                             this.logger.info('买单创建成功', {
                                 orderId: buyOrder.id,
+                                clientOrderId: buyClientOrderId,
                                 amount: buyOrder.amount,
                                 price: buyOrder.price,
                                 status: buyOrder.status
@@ -778,12 +780,14 @@ class AvellanedaStrategy {
                     const sellValidation = this.riskManager.validateOrder('sell', sellAmount, optimalAsk);
                     if (sellValidation.valid) {
                         console.log('   ✅ 风险验证通过');
-                        const sellOrder = await this.createOrder('sell', sellAmount, optimalAsk);
+                        const sellClientOrderId = Helpers.generateUniqueId(); // 生成唯一的 clientOrderId
+                        const sellOrder = await this.createOrder('sell', sellAmount, optimalAsk, sellClientOrderId);
                         if (sellOrder) {
                             this.activeOrders.set(sellOrder.id, sellOrder);
                             console.log(`   ✅ 卖单创建成功 - ID: ${sellOrder.id}`);
                             this.logger.info('卖单创建成功', {
                                 orderId: sellOrder.id,
+                                clientOrderId: sellClientOrderId,
                                 amount: sellOrder.amount,
                                 price: sellOrder.price,
                                 status: sellOrder.status
@@ -832,59 +836,74 @@ class AvellanedaStrategy {
     /**
      * 创建单个订单（下单后主动校验订单状态，带超时和重试）
      */
-    async createOrder(side, amount, price, maxRetries = 3, timeout = 5000) {
+    async createOrder(side, amount, price, clientOrderId, maxRetries = 3, timeout = 5000) {
         let attempt = 0;
         while (attempt < maxRetries) {
             try {
-                console.log(`   🔧 正在创建${side === 'buy' ? '买单' : '卖单'}... (第${attempt + 1}次尝试)`);
+                console.log(`   🔧 正在创建${side === 'buy' ? '买单' : '卖单'}... (第${attempt + 1}次尝试, ClientOrderID: ${clientOrderId})`);
                 console.log(`      参数: ${side} ${amount} BTC @ ${price} USDT`);
-                // 下单超时保护
+
+                // 尝试下单
+                const orderPromise = this.exchangeManager.createOrder(side, amount, price, 'limit', { clientOrderId });
                 const order = await Promise.race([
-                    this.exchangeManager.createOrder(side, amount, price, 'limit'),
-                    this.sleep(timeout).then(() => { throw new Error('下单超时'); })
+                    orderPromise,
+                    this.sleep(timeout).then(() => { throw new Error('下单请求超时'); })
                 ]);
+
                 if (order && order.id) {
-                    // 主动校验订单状态
-                    let checkedOrder = null;
-                    try {
-                        checkedOrder = await this.exchangeManager.getOrder(order.id, this.config.get('symbol'));
-                        if (checkedOrder && checkedOrder.status) {
-                            console.log(`   ✅ 订单状态校验成功 - 状态: ${checkedOrder.status}`);
-                            this.logger.info('Order status checked', {
-                                id: checkedOrder.id,
-                                status: checkedOrder.status
-                            });
-                        } else {
-                            console.log('   ⚠️ 订单状态校验失败，未获取到有效状态');
-                            this.logger.warn('订单状态校验失败', { id: order.id });
-                        }
-                    } catch (checkErr) {
-                        console.log('   ⚠️ 订单状态校验异常:', checkErr.message);
-                        this.logger.warn('订单状态校验异常', { id: order.id, error: checkErr.message });
-                    }
-                    console.log(`   ✅ 订单创建成功 - ID: ${order.id}`);
-                    this.logger.info('Order created', {
+                    // 订单已成功提交并返回ID
+                    console.log(`   ✅ 订单提交成功 - ID: ${order.id}`);
+                    this.logger.info('Order submitted', {
                         id: order.id,
+                        clientOrderId: clientOrderId,
                         side,
                         amount,
                         price,
                         status: order.status
                     });
-                    return checkedOrder || order;
+                    return order;
                 } else {
-                    console.log(`   ❌ 订单创建失败 - 返回null`);
+                    // 订单提交失败，但没有抛出异常（例如返回null或空对象）
+                    console.log(`   ❌ 订单提交失败 - 返回无效订单对象`);
+                    throw new Error('无效订单返回');
                 }
-                return null;
             } catch (error) {
                 attempt++;
-                console.log(`   ❌ 第${attempt}次下单失败: ${error.message}`);
-                this.logger.warn('下单失败', {
+                console.log(`   ❌ 第${attempt}次下单请求失败: ${error.message}`);
+                this.logger.warn('下单请求失败', {
                     side,
                     amount,
                     price,
+                    clientOrderId,
                     attempt,
                     error: error.message
                 });
+
+                // 如果是超时错误，尝试通过 clientOrderId 查询订单状态
+                if (error.message === '下单请求超时' || error.message.includes('timeout')) {
+                    console.log(`   ⏳ 下单超时，尝试通过 ClientOrderID: ${clientOrderId} 查询订单状态...`);
+                    try {
+                        const existingOrder = await this.exchangeManager.getOrderByClientOrderId(clientOrderId, this.config.get('symbol'));
+                        if (existingOrder && existingOrder.id) {
+                            console.log(`   ✅ 发现现有订单 - ID: ${existingOrder.id}, 状态: ${existingOrder.status}`);
+                            this.logger.info('Found existing order after timeout', {
+                                id: existingOrder.id,
+                                clientOrderId: clientOrderId,
+                                status: existingOrder.status
+                            });
+                            return existingOrder; // 找到现有订单，不再重试
+                        } else {
+                            console.log('   ⚠️ 未找到现有订单，将重试下单');
+                        }
+                    } catch (queryError) {
+                        console.log(`   ❌ 查询现有订单失败: ${queryError.message}`);
+                        this.logger.error('Failed to query existing order by clientOrderId', {
+                            clientOrderId,
+                            error: queryError.message
+                        });
+                    }
+                }
+
                 if (attempt < maxRetries) {
                     await this.sleep(1000); // 重试间隔1秒
                     console.log('   ⏳ 准备重试下单...');
@@ -893,13 +912,14 @@ class AvellanedaStrategy {
                         side,
                         amount,
                         price,
+                        clientOrderId,
                         attempt,
                         error: error.message
                     });
                 }
             }
         }
-        return null;
+        return null; // 所有重试都失败
     }
 
     /**
