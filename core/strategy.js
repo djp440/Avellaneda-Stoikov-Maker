@@ -471,11 +471,11 @@ class AvellanedaStrategy {
         console.log(`   策略价差: ${(optimalSpread / midPrice * 100).toFixed(4)}%`);
         
         console.log(`\n📦 库存信息:`);
-        console.log(`   当前库存: ${currentInventory.toFixed(8)} BTC`);
-        console.log(`   目标库存: ${targetInventory.toFixed(8)} BTC`);
+        console.log(`   当前库存: ${currentInventory.toFixed(8)} ${this.config.get('baseCurrency')}`);
+        console.log(`   目标库存: ${targetInventory.toFixed(8)} ${this.config.get('baseCurrency')}`);
         console.log(`   库存偏差: ${(inventorySkew * 100).toFixed(4)}%`);
-        console.log(`   基础余额: ${baseAmount.toFixed(8)} BTC`);
-        console.log(`   计价余额: ${quoteAmount.toFixed(2)} USDT`);
+        console.log(`   基础余额: ${baseAmount.toFixed(8)} ${this.config.get('baseCurrency')}`);
+        console.log(`   计价余额: ${quoteAmount.toFixed(2)} ${this.config.get('quoteCurrency')}`);
         
         // 显示技术指标
         const indicators = this.indicators.getCurrentValues();
@@ -487,7 +487,7 @@ class AvellanedaStrategy {
         // 显示风险状态
         const riskStatus = this.riskManager.getRiskStatus();
         console.log(`\n🛡️ 风险状态:`);
-        console.log(`   当前持仓: ${riskStatus.state.currentPosition.toFixed(8)} BTC`);
+        console.log(`   当前持仓: ${riskStatus.state.currentPosition.toFixed(8)} ${this.config.get('baseCurrency')}`);
         console.log(`   持仓价值: ${riskStatus.state.currentPositionValue.toFixed(2)} USDT`);
         console.log(`   账户总值: ${riskStatus.state.totalAccountValue.toFixed(2)} USDT`);
         console.log(`   未实现盈亏: ${riskStatus.state.unrealizedPnL.toFixed(2)} USDT`);
@@ -615,8 +615,8 @@ class AvellanedaStrategy {
             );
             
             console.log('\n🎯 订单数量计算结果:');
-            console.log(`   买单数量: ${buyAmount.toFixed(8)} BTC`);
-            console.log(`   卖单数量: ${sellAmount.toFixed(8)} BTC`);
+            console.log(`   买单数量: ${buyAmount.toFixed(8)} ${this.config.get('baseCurrency')}`);
+            console.log(`   卖单数量: ${sellAmount.toFixed(8)} ${this.config.get('baseCurrency')}`);
             console.log(`   库存偏差: ${((currentInventory - targetInventory) / totalInventoryValue * 100).toFixed(4)}%`);
             
             // 创建买单
