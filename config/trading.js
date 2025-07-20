@@ -11,7 +11,7 @@ module.exports = {
 
     // 策略参数
     riskFactor: 0.2,                       // 风险因子，控制策略的激进程度，值越大风险越高
-    orderAmount: 0.04,                  // 单笔订单数量，以基础货币为单位
+    orderAmount: 0.01,                  // 单笔订单数量，以基础货币为单位
     minSpread: 0.0011,                      // 最小价差，低于此值不会下单
     maxSpread: 0.03,                       // 最大价差，高于此值不会下单
     inventoryTarget: 0,                    // 库存目标，0表示中性，正数表示做多偏好，负数表示做空偏好
