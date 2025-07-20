@@ -461,8 +461,12 @@ class AvellanedaMarketMaking {
 
             // 停止健康检查
             console.log('💓 停止健康检查...');
-            this.stopHealthCheck();
-            console.log('✅ 健康检查已停止');
+            try {
+                this.stopHealthCheck();
+                console.log('✅ 健康检查已停止');
+            } catch (error) {
+                console.log('⚠️ 停止健康检查时出错:', error.message);
+            }
 
             // 停止策略
             if (this.strategy) {
@@ -527,9 +531,20 @@ class AvellanedaMarketMaking {
      * 停止健康检查
      */
     stopHealthCheck() {
-        if (this.healthCheckInterval) {
-            clearInterval(this.healthCheckInterval);
-            this.healthCheckInterval = null;
+        try {
+            if (this.healthCheckInterval) {
+                clearInterval(this.healthCheckInterval);
+                this.healthCheckInterval = null;
+                if (this.logger) {
+                    this.logger.info('健康检查已停止');
+                }
+            }
+        } catch (error) {
+            if (this.logger) {
+                this.logger.error('停止健康检查时出错', error);
+            } else {
+                console.error('停止健康检查时出错:', error.message);
+            }
         }
     }
 
@@ -599,17 +614,29 @@ class AvellanedaMarketMaking {
      * 清理资源
      */
     cleanup() {
-        // 停止健康检查
-        this.stopHealthCheck();
-        
-        // 清理配置监听器
-        if (this.config) {
-            this.config.watchers.clear();
+        try {
+            // 停止健康检查
+            this.stopHealthCheck();
+        } catch (error) {
+            console.error('清理健康检查时出错:', error.message);
         }
         
-        // 清理日志
-        if (this.logger) {
-            this.logger.clearPerformanceMetrics();
+        try {
+            // 清理配置监听器
+            if (this.config && this.config.watchers) {
+                this.config.watchers.clear();
+            }
+        } catch (error) {
+            console.error('清理配置监听器时出错:', error.message);
+        }
+        
+        try {
+            // 清理日志
+            if (this.logger && this.logger.clearPerformanceMetrics) {
+                this.logger.clearPerformanceMetrics();
+            }
+        } catch (error) {
+            console.error('清理日志时出错:', error.message);
         }
     }
 
