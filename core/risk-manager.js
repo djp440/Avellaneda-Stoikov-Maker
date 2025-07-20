@@ -365,6 +365,7 @@ class RiskManager {
      */
     async handleCriticalRisk(event) {
         this.logger.error('严重风险事件', event);
+        console.error(`风险管理器: 严重风险事件触发 - ${event.message}`);
         
         // 触发紧急停止
         await this.triggerEmergencyStop(event);
@@ -412,6 +413,7 @@ class RiskManager {
     async triggerEmergencyStop(event) {
         try {
             this.riskState.isEmergencyStop = true;
+            console.error('风险管理器: 紧急停止已激活！');
             
             this.logger.error('触发紧急停止', {
                 reason: event.message,
@@ -423,6 +425,7 @@ class RiskManager {
             
         } catch (error) {
             this.logger.error('触发紧急停止时出错', error);
+            console.error('风险管理器: 触发紧急停止时出错:', error.message);
         }
     }
     

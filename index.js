@@ -686,10 +686,12 @@ class AvellanedaMarketMaking {
 }
 
 // 主函数
+console.log('--- index.js: 脚本开始执行 ---');
 
 async function main() {
-    console.log('main函数开始执行');
+    console.log('--- main函数开始执行 ---');
     const strategy = new AvellanedaMarketMaking();
+    console.log('--- AvellanedaMarketMaking 实例创建完成 ---');
     
     // 强制退出处理
     let forceExitTimeout = null;
