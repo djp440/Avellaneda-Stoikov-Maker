@@ -16,7 +16,7 @@ class InstantVolatilityIndicator {
         
         this.logger = config ? new Logger(config) : console;
         if (this.logger.info) {
-            this.logger.info('InstantVolatilityIndicator initialized', {
+            this.logger.info('瞬时波动率指标已初始化', {
                 bufferSize,
                 alpha
             });
@@ -62,7 +62,7 @@ class InstantVolatilityIndicator {
             }
         } catch (error) {
             if (this.logger.error) {
-                this.logger.error('Error adding price to volatility indicator', error);
+                this.logger.error('向波动率指标添加价格数据时出错', error);
             }
         }
     }
@@ -118,7 +118,7 @@ class InstantVolatilityIndicator {
             }
         } catch (error) {
             if (this.logger.error) {
-                this.logger.error('Error calculating volatility', error);
+                this.logger.error('计算波动率时出错', error);
             }
         }
     }
@@ -142,7 +142,7 @@ class InstantVolatilityIndicator {
         this.isSamplingBufferChanged = false;
         
         if (this.logger.info) {
-            this.logger.info('InstantVolatilityIndicator reset');
+            this.logger.info('瞬时波动率指标已重置');
         }
     }
 }
@@ -161,7 +161,7 @@ class TradingIntensityIndicator {
         
         this.logger = config ? new Logger(config) : console;
         if (this.logger.info) {
-            this.logger.info('TradingIntensityIndicator initialized', {
+            this.logger.info('交易强度指标已初始化', {
                 bufferSize,
                 depth
             });
@@ -211,7 +211,7 @@ class TradingIntensityIndicator {
             }
         } catch (error) {
             if (this.logger.error) {
-                this.logger.error('Error adding order book to trading intensity indicator', error);
+                this.logger.error('向交易强度指标添加订单簿数据时出错', error);
             }
         }
     }
@@ -270,7 +270,7 @@ class TradingIntensityIndicator {
             return tradingIntensity;
         } catch (error) {
             if (this.logger.error) {
-                this.logger.error('Error calculating trading intensity', error);
+                this.logger.error('计算交易强度时出错', error);
             }
             return 0;
         }
@@ -294,7 +294,7 @@ class TradingIntensityIndicator {
         this.isSamplingBufferChanged = false;
         
         if (this.logger.info) {
-            this.logger.info('TradingIntensityIndicator reset');
+            this.logger.info('交易强度指标已重置');
         }
     }
 }
@@ -321,7 +321,7 @@ class IndicatorsManager {
         );
         
         if (this.logger.info) {
-            this.logger.info('IndicatorsManager initialized', {
+            this.logger.info('技术指标管理器已初始化', {
                 volatilityBufferSize: config.get ? (config.get('volatilityBufferSize') || 100) : 100,
                 tradingIntensityBufferSize: config.get ? (config.get('tradingIntensityBufferSize') || 100) : 100,
                 orderBookDepth: config.get ? (config.get('orderBookDepth') || 10) : 10
@@ -385,7 +385,7 @@ class IndicatorsManager {
         this.tradingIntensityIndicator.reset();
         
         if (this.logger.info) {
-            this.logger.info('All indicators reset');
+            this.logger.info('所有指标已重置');
         }
     }
 

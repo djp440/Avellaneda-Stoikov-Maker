@@ -2,6 +2,7 @@ const ccxt = require('ccxt');
 const EventEmitter = require('events');
 const Helpers = require('../utils/helpers');
 const Logger = require('../utils/logger');
+const NetworkManager = require('./network-manager');
 
 /**
  * 交易所接口管理类
@@ -12,6 +13,9 @@ class ExchangeManager extends EventEmitter {
         super();
         this.config = config;
         this.logger = new Logger(config);
+        
+        // 网络管理器
+        this.networkManager = new NetworkManager(config);
         
         // 交易所实例
         this.exchange = null;
@@ -59,7 +63,16 @@ class ExchangeManager extends EventEmitter {
         // 事件监听器
         this.setupEventListeners();
         
-        this.logger.info('ExchangeManager initialized', {
+        // 监听网络状态变化
+        this.networkManager.on('connectionLost', () => {
+            this.handleNetworkConnectionLost();
+        });
+        
+        this.networkManager.on('connectionRestored', () => {
+            this.handleNetworkConnectionRestored();
+        });
+        
+        this.logger.info('交易所管理器已初始化', {
             exchange: this.exchangeName,
             symbol: config.get('symbol')
         });
@@ -94,7 +107,7 @@ class ExchangeManager extends EventEmitter {
         });
 
         this.on('orderUpdate', (data) => {
-            this.logger.info('Order updated', {
+            this.logger.info('订单已更新', {
                 id: data.id,
                 status: data.status,
                 side: data.side
@@ -102,12 +115,12 @@ class ExchangeManager extends EventEmitter {
         });
 
         this.on('connectionLost', () => {
-            this.logger.warn('Exchange connection lost');
+            this.logger.warn('交易所连接丢失');
             this.handleConnectionLost();
         });
 
         this.on('connectionRestored', () => {
-            this.logger.info('Exchange connection restored');
+            this.logger.info('交易所连接已恢复');
             this.connectionRetryCount = 0;
         });
     }
@@ -117,9 +130,15 @@ class ExchangeManager extends EventEmitter {
      */
     async initialize() {
         try {
-            this.logger.info('Initializing exchange connection', {
+            this.logger.info('正在初始化交易所连接', {
                 exchange: this.exchangeName
             });
+
+            // 检查网络连接
+            if (!this.networkManager.isNetworkAvailable()) {
+                this.logger.warn('网络不可用，等待连接...');
+                await this.waitForNetworkConnection();
+            }
 
             // 创建交易所实例
             await this.createExchangeInstance();
@@ -149,6 +168,32 @@ class ExchangeManager extends EventEmitter {
     }
 
     /**
+     * 等待网络连接
+     */
+    async waitForNetworkConnection(timeout = 60000) {
+        return new Promise((resolve, reject) => {
+            const startTime = Date.now();
+            
+            const checkNetwork = () => {
+                if (this.networkManager.isNetworkAvailable()) {
+                    this.logger.info('Network connection restored');
+                    resolve();
+                    return;
+                }
+                
+                if (Date.now() - startTime > timeout) {
+                    reject(new Error('Network connection timeout'));
+                    return;
+                }
+                
+                setTimeout(checkNetwork, 5000);
+            };
+            
+            checkNetwork();
+        });
+    }
+
+    /**
      * 创建交易所实例
      */
     async createExchangeInstance() {
@@ -160,8 +205,11 @@ class ExchangeManager extends EventEmitter {
                 throw new Error(`Unsupported exchange: ${this.exchangeName}`);
             }
             
+            // 获取代理配置
+            const proxyConfig = this.networkManager.getProxyConfig();
+            
             // 创建交易所实例
-            this.exchange = new ccxt[this.exchangeName]({
+            const exchangeOptions = {
                 apiKey: exchangeConfig.apiKey,
                 secret: exchangeConfig.secret,
                 password: exchangeConfig.password, // Bitget需要passphrase
@@ -171,14 +219,25 @@ class ExchangeManager extends EventEmitter {
                     defaultType: 'spot',
                     adjustForTimeDifference: true
                 }
-            });
+            };
+            
+            // 添加代理配置
+            if (proxyConfig.enabled) {
+                exchangeOptions.proxy = `${proxyConfig.protocol}://${proxyConfig.host}:${proxyConfig.port}`;
+                if (proxyConfig.auth) {
+                    exchangeOptions.proxy = `${proxyConfig.protocol}://${proxyConfig.auth.username}:${proxyConfig.auth.password}@${proxyConfig.host}:${proxyConfig.port}`;
+                }
+            }
+            
+            this.exchange = new ccxt[this.exchangeName](exchangeOptions);
             
             // 设置请求超时
             this.exchange.timeout = 30000;
             
             this.logger.info('Exchange instance created', {
                 exchange: this.exchangeName,
-                sandbox: this.config.isSandbox()
+                sandbox: this.config.isSandbox(),
+                hasProxy: proxyConfig.enabled
             });
             
         } catch (error) {
@@ -615,6 +674,37 @@ class ExchangeManager extends EventEmitter {
     }
 
     /**
+     * 处理网络连接丢失
+     */
+    handleNetworkConnectionLost() {
+        this.logger.warn('Network connection lost, pausing exchange operations');
+        
+        if (this.isConnected) {
+            this.isConnected = false;
+            this.emit('connectionLost');
+        }
+        
+        // 停止数据更新
+        this.stopDataUpdates();
+    }
+
+    /**
+     * 处理网络连接恢复
+     */
+    async handleNetworkConnectionRestored() {
+        this.logger.info('Network connection restored, attempting to reconnect exchange');
+        
+        // 等待网络稳定
+        setTimeout(async () => {
+            try {
+                await this.reconnect();
+            } catch (error) {
+                this.logger.error('Failed to reconnect after network restoration', error);
+            }
+        }, 2000);
+    }
+
+    /**
      * 处理连接错误
      */
     handleConnectionError(error) {
@@ -705,6 +795,9 @@ class ExchangeManager extends EventEmitter {
                 this.reconnectTimer = null;
             }
             
+            // 关闭网络管理器
+            this.networkManager.close();
+            
             // 重置状态
             this.isConnected = false;
             this.isConnecting = false;
@@ -727,7 +820,9 @@ class ExchangeManager extends EventEmitter {
             symbol: this.config.get('symbol'),
             lastConnectionTime: this.lastConnectionTime,
             connectionRetryCount: this.connectionRetryCount,
-            lastUpdate: this.marketData.lastUpdate
+            lastUpdate: this.marketData.lastUpdate,
+            networkStatus: this.networkManager.getNetworkStatus(),
+            networkStats: this.networkManager.getConnectionStats()
         };
     }
 }

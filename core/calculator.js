@@ -39,12 +39,13 @@ class AvellanedaCalculator {
     calculateOptimalSpread(volatility, tradingIntensity, timeToExpiry = 0) {
         try {
             if (!volatility || !tradingIntensity || volatility <= 0 || tradingIntensity <= 0) {
-                this.logger.warn('Invalid parameters for optimal spread calculation', {
+                this.logger.warn('最优价差计算参数无效', {
                     volatility,
                     tradingIntensity,
-                    timeToExpiry
+                    timeToExpiry,
+                    reason: tradingIntensity <= 0 ? '交易强度为零，可能是订单簿数据不完整' : '波动率无效'
                 });
-                return this.config.minSpread;
+                return this.config.get('minSpread');
             }
 
             // 时间项 (γ * σ² * t)

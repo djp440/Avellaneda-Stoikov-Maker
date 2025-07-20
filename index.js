@@ -92,11 +92,8 @@ class AvellanedaMarketMaking {
      */
     async initializeStrategy() {
         try {
-            // 获取策略配置
-            const strategyConfig = this.config.getAll();
-            
-            // 创建策略实例
-            this.strategy = new AvellanedaStrategy(strategyConfig);
+            // 创建策略实例，传递配置管理器实例
+            this.strategy = new AvellanedaStrategy(this.config);
             
             // 初始化策略
             const initialized = await this.strategy.initialize();
@@ -128,6 +125,91 @@ class AvellanedaMarketMaking {
     }
 
     /**
+     * 网络连接测试
+     */
+    async testNetworkConnection() {
+        const maxRetries = 2; // 减少重试次数
+        let retryCount = 0;
+        
+        while (retryCount < maxRetries) {
+            try {
+                console.log(`🌐 网络连接测试 (第${retryCount + 1}次)...`);
+                
+                // 创建网络管理器进行快速测试
+                const NetworkManager = require('./core/network-manager');
+                const networkManager = new NetworkManager(this.config);
+                
+                // 执行快速网络测试（只测试一个连接）
+                const testResult = await this.performQuickNetworkTest(networkManager);
+                
+                if (testResult.success) {
+                    console.log(`✅ 网络连接正常 - 延迟: ${testResult.latency}ms`);
+                    this.logger.info('网络连接测试通过', testResult);
+                    
+                    // 关闭网络管理器
+                    networkManager.close();
+                    return true;
+                } else {
+                    throw new Error(`网络连接失败: ${testResult.error}`);
+                }
+                
+            } catch (error) {
+                retryCount++;
+                this.logger.warn(`网络连接测试失败 (第${retryCount}次)`, error);
+                
+                if (retryCount < maxRetries) {
+                    console.log(`❌ 网络连接测试失败: ${error.message}`);
+                    console.log(`⏳ 3秒后重试... (${retryCount}/${maxRetries})`);
+                    
+                    // 等待3秒后重试（缩短等待时间）
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+                } else {
+                    console.log(`❌ 网络连接测试连续${maxRetries}次失败`);
+                    console.log('💡 建议检查网络连接或配置代理');
+                    this.logger.error('网络连接测试最终失败', error);
+                    return false;
+                }
+            }
+        }
+        
+        return false;
+    }
+
+    /**
+     * 执行快速网络测试
+     */
+    async performQuickNetworkTest(networkManager) {
+        try {
+            // 只测试一个可靠的连接点
+            const testUrl = 'https://www.google.com';
+            const startTime = Date.now();
+            
+            // 使用简化的连接测试
+            const result = await networkManager.testConnection(testUrl);
+            
+            if (result.success) {
+                return {
+                    success: true,
+                    latency: result.latency,
+                    url: testUrl
+                };
+            } else {
+                return {
+                    success: false,
+                    error: result.error || '连接超时',
+                    url: testUrl
+                };
+            }
+        } catch (error) {
+            return {
+                success: false,
+                error: error.message,
+                url: 'unknown'
+            };
+        }
+    }
+
+    /**
      * 启动策略
      */
     async start() {
@@ -139,6 +221,13 @@ class AvellanedaMarketMaking {
 
             this.logger.info('启动策略');
             console.log('🚀 启动策略...');
+
+            // 网络连接测试
+            console.log('🔍 执行网络连接测试...');
+            const networkTestPassed = await this.testNetworkConnection();
+            if (!networkTestPassed) {
+                throw new Error('网络连接测试失败，无法启动策略');
+            }
 
             // 启动策略
             const started = await this.strategy.start();
@@ -244,26 +333,26 @@ class AvellanedaMarketMaking {
      */
     async performHealthCheck() {
         try {
-            // 检查交易所连接
-            const status = await this.exchange.fetchStatus();
-            if (status.status !== 'ok') {
-                this.logger.warn('交易所状态异常', { status: status.status });
-            }
-
             // 检查策略状态
-            const strategyStatus = this.strategy.getStatus();
-            if (!strategyStatus.isRunning) {
-                this.logger.warn('策略状态异常', strategyStatus);
+            if (this.strategy) {
+                const strategyStatus = this.strategy.getStatus();
+                if (!strategyStatus.isRunning) {
+                    this.logger.warn('策略状态异常', strategyStatus);
+                }
             }
 
             // 记录内存使用
-            this.logger.memoryUsage();
+            if (this.logger && this.logger.memoryUsage) {
+                this.logger.memoryUsage();
+            }
 
             // 记录系统状态
-            this.logger.systemStatus('healthy', {
-                uptime: this.startTime ? Date.now() - this.startTime : 0,
-                strategyRunning: this.isRunning
-            });
+            if (this.logger && this.logger.systemStatus) {
+                this.logger.systemStatus('healthy', {
+                    uptime: this.startTime ? Date.now() - this.startTime : 0,
+                    strategyRunning: this.isRunning
+                });
+            }
 
         } catch (error) {
             this.logger.error('健康检查异常', error);
@@ -377,6 +466,20 @@ async function main() {
         
     } catch (error) {
         console.error('❌ 程序运行失败:', error.message);
+        
+        // 如果是网络连接问题，提供详细的解决建议
+        if (error.message.includes('网络连接测试失败')) {
+            console.log('\n🔧 网络连接问题解决方案:');
+            console.log('1. 检查网络连接是否正常');
+            console.log('2. 如果使用VPN，确保VPN连接稳定');
+            console.log('3. 配置代理服务器:');
+            console.log('   - 在 .env 文件中添加代理配置');
+            console.log('   - 运行 node test-network-advanced.js 测试网络');
+            console.log('4. 查看详细配置指南: docs/NETWORK_SETUP.md');
+            console.log('\n💡 建议先运行网络测试:');
+            console.log('   node test-network-advanced.js');
+        }
+        
         process.exit(1);
     }
 }

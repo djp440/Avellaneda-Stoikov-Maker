@@ -60,7 +60,7 @@ class RiskManager {
         // 风险检查定时器
         this.riskCheckTimer = null;
         
-        this.logger.info('RiskManager initialized', {
+        this.logger.info('风险管理器已初始化', {
             riskConfig: this.riskConfig,
             maxPositionSize: this.riskConfig.maxPositionSize,
             stopLossPercent: this.riskConfig.stopLossPercent
@@ -72,7 +72,7 @@ class RiskManager {
      */
     async initialize() {
         try {
-            this.logger.info('Initializing risk manager');
+            this.logger.info('正在初始化风险管理器');
             
             // 重置日盈亏
             this.resetDailyPnL();
@@ -80,11 +80,11 @@ class RiskManager {
             // 启动风险检查定时器
             this.startRiskCheck();
             
-            this.logger.info('Risk manager initialized successfully');
+            this.logger.info('风险管理器初始化成功');
             return true;
             
         } catch (error) {
-            this.logger.error('Failed to initialize risk manager', error);
+            this.logger.error('风险管理器初始化失败', error);
             return false;
         }
     }
@@ -101,7 +101,7 @@ class RiskManager {
             this.performRiskCheck();
         }, this.riskConfig.riskCheckInterval);
         
-        this.logger.info('Risk check timer started', {
+        this.logger.info('风险检查定时器已启动', {
             interval: this.riskConfig.riskCheckInterval
         });
     }
@@ -113,7 +113,7 @@ class RiskManager {
         if (this.riskCheckTimer) {
             clearInterval(this.riskCheckTimer);
             this.riskCheckTimer = null;
-            this.logger.info('Risk check timer stopped');
+            this.logger.info('风险检查定时器已停止');
         }
     }
     
@@ -147,7 +147,7 @@ class RiskManager {
             }
             
         } catch (error) {
-            this.logger.error('Error performing risk check', error);
+            this.logger.error('执行风险检查时出错', error);
         }
     }
     
@@ -166,23 +166,19 @@ class RiskManager {
         
         // 计算基于百分比的限制
         const maxPositionValue = totalAccountValue * (this.riskConfig.maxPositionValuePercent / 100);
-        const maxPositionSize = totalAccountValue * (this.riskConfig.maxPositionSizePercent / 100);
         
         const positionLimitExceeded = positionValue > maxPositionValue;
-        const sizeLimitExceeded = position > maxPositionSize;
         
-        if (positionLimitExceeded || sizeLimitExceeded) {
+        if (positionLimitExceeded) {
             return {
                 type: 'POSITION_LIMIT',
                 triggered: true,
                 severity: 'HIGH',
-                message: `Position limits exceeded: size=${position}/${maxPositionSize.toFixed(2)} (${this.riskConfig.maxPositionSizePercent}%), value=${positionValue}/${maxPositionValue.toFixed(2)} (${this.riskConfig.maxPositionValuePercent}%)`,
+                message: `持仓价值超限: 当前=${positionValue.toFixed(2)}USDT/${maxPositionValue.toFixed(2)}USDT (${this.riskConfig.maxPositionValuePercent}%)`,
                 data: {
                     currentPosition: position,
                     currentValue: positionValue,
-                    maxPosition: maxPositionSize,
                     maxValue: maxPositionValue,
-                    maxPositionPercent: this.riskConfig.maxPositionSizePercent,
                     maxValuePercent: this.riskConfig.maxPositionValuePercent,
                     totalAccountValue
                 }
@@ -330,7 +326,7 @@ class RiskManager {
      */
     async handleRiskEvent(event) {
         try {
-            this.logger.warn('Risk event triggered', event);
+            this.logger.warn('风险事件触发', event);
             
             // 记录风险事件
             this.riskState.riskAlerts.push({
@@ -360,7 +356,7 @@ class RiskManager {
             });
             
         } catch (error) {
-            this.logger.error('Error handling risk event', error);
+            this.logger.error('处理风险事件时出错', error);
         }
     }
     
@@ -368,7 +364,7 @@ class RiskManager {
      * 处理严重风险事件
      */
     async handleCriticalRisk(event) {
-        this.logger.error('Critical risk event', event);
+        this.logger.error('严重风险事件', event);
         
         // 触发紧急停止
         await this.triggerEmergencyStop(event);
@@ -381,7 +377,7 @@ class RiskManager {
      * 处理高风险事件
      */
     async handleHighRisk(event) {
-        this.logger.warn('High risk event', event);
+        this.logger.warn('高风险事件', event);
         
         // 减少仓位
         await this.reducePosition(event);
@@ -404,10 +400,10 @@ class RiskManager {
      * 处理低风险事件
      */
     async handleLowRisk(event) {
-        this.logger.info('Low risk event', event);
+        this.logger.info('低风险事件', event);
         
         // 记录日志
-        this.logger.info('Risk event logged', event);
+        this.logger.info('风险事件已记录', event);
     }
     
     /**
@@ -417,7 +413,7 @@ class RiskManager {
         try {
             this.riskState.isEmergencyStop = true;
             
-            this.logger.error('Emergency stop triggered', {
+            this.logger.error('触发紧急停止', {
                 reason: event.message,
                 timestamp: new Date().toISOString()
             });
@@ -426,7 +422,7 @@ class RiskManager {
             // 实际实现中需要与策略模块通信
             
         } catch (error) {
-            this.logger.error('Error triggering emergency stop', error);
+            this.logger.error('触发紧急停止时出错', error);
         }
     }
     
@@ -435,13 +431,13 @@ class RiskManager {
      */
     async reducePosition(event) {
         try {
-            this.logger.warn('Reducing position due to risk event', event);
+            this.logger.warn('因风险事件减少仓位', event);
             
             // 计算需要减少的仓位
             const currentPosition = this.riskState.currentPosition;
             const reductionAmount = Math.abs(currentPosition) * 0.5; // 减少50%
             
-            this.logger.info('Position reduction calculated', {
+            this.logger.info('仓位减少计算完成', {
                 currentPosition,
                 reductionAmount
             });
@@ -450,7 +446,7 @@ class RiskManager {
             // 实际实现中需要与策略模块通信
             
         } catch (error) {
-            this.logger.error('Error reducing position', error);
+            this.logger.error('减少仓位时出错', error);
         }
     }
     
@@ -459,13 +455,13 @@ class RiskManager {
      */
     async adjustStrategyParameters(event) {
         try {
-            this.logger.info('Adjusting strategy parameters due to risk event', event);
+            this.logger.info('因风险事件调整策略参数', event);
             
             // 根据风险事件调整参数
             // 例如：减少订单大小、增加价差等
             
         } catch (error) {
-            this.logger.error('Error adjusting strategy parameters', error);
+            this.logger.error('调整策略参数时出错', error);
         }
     }
     
@@ -474,7 +470,7 @@ class RiskManager {
      */
     sendEmergencyAlert(event) {
         // 这里可以实现发送邮件、短信、推送通知等
-        this.logger.error('EMERGENCY ALERT', {
+        this.logger.error('紧急警报', {
             message: event.message,
             timestamp: new Date().toISOString(),
             severity: event.severity
@@ -486,7 +482,7 @@ class RiskManager {
      */
     sendRiskWarning(event) {
         // 这里可以实现发送风险警告
-        this.logger.warn('RISK WARNING', {
+        this.logger.warn('风险警告', {
             message: event.message,
             timestamp: new Date().toISOString(),
             severity: event.severity
@@ -516,7 +512,7 @@ class RiskManager {
             this.riskState.maxUnrealizedPnL = this.riskState.unrealizedPnL;
         }
         
-        this.logger.debug('Position updated', {
+        this.logger.debug('持仓信息已更新', {
             oldPosition,
             newPosition: position,
             oldValue,
@@ -532,7 +528,7 @@ class RiskManager {
         const oldValue = this.riskState.totalAccountValue;
         this.riskState.totalAccountValue = totalAccountValue;
         
-        this.logger.debug('Account value updated', {
+        this.logger.debug('账户总价值已更新', {
             oldValue,
             newValue: totalAccountValue
         });

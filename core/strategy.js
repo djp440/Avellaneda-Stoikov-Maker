@@ -60,7 +60,7 @@ class AvellanedaStrategy {
         // 设置交易所事件监听
         this.setupExchangeEventListeners();
         
-        this.logger.info('AvellanedaStrategy initialized', {
+        this.logger.info('Avellaneda策略已初始化', {
             orderRefreshTime: this.orderRefreshTime,
             filledOrderDelay: this.filledOrderDelay,
             riskManager: 'enabled'
@@ -121,7 +121,7 @@ class AvellanedaStrategy {
             this.updateIndicators();
             
         } catch (error) {
-            this.logger.error('Error handling order book update', error);
+            this.logger.error('处理订单簿更新时出错', error);
         }
     }
 
@@ -135,7 +135,7 @@ class AvellanedaStrategy {
             this.currentMarketData.timestamp = data.timestamp;
             
         } catch (error) {
-            this.logger.error('Error handling ticker update', error);
+            this.logger.error('处理价格更新时出错', error);
         }
     }
 
@@ -151,7 +151,7 @@ class AvellanedaStrategy {
             };
             
         } catch (error) {
-            this.logger.error('Error handling balance update', error);
+            this.logger.error('处理余额更新时出错', error);
         }
     }
 
@@ -159,7 +159,7 @@ class AvellanedaStrategy {
      * 处理连接丢失
      */
     handleConnectionLost() {
-        this.logger.warn('Exchange connection lost, pausing strategy execution');
+        this.logger.warn('交易所连接丢失，暂停策略执行');
         // 可以在这里添加连接丢失时的处理逻辑
     }
 
@@ -167,7 +167,7 @@ class AvellanedaStrategy {
      * 处理连接恢复
      */
     handleConnectionRestored() {
-        this.logger.info('Exchange connection restored, resuming strategy execution');
+        this.logger.info('交易所连接恢复，继续策略执行');
         // 可以在这里添加连接恢复时的处理逻辑
     }
 
@@ -176,7 +176,7 @@ class AvellanedaStrategy {
      */
     async initialize() {
         try {
-            this.logger.info('Initializing strategy');
+            this.logger.info('正在初始化策略');
             
             // 初始化交易所连接
             const exchangeInitialized = await this.exchangeManager.initialize();
@@ -184,8 +184,7 @@ class AvellanedaStrategy {
                 throw new Error('Failed to initialize exchange connection');
             }
             
-            // 初始化技术指标
-            this.indicators.initialize();
+            // 技术指标管理器不需要显式初始化，在构造函数中已经初始化
             
             // 初始化风险管理器
             const riskInitialized = await this.riskManager.initialize();
@@ -196,11 +195,11 @@ class AvellanedaStrategy {
             // 标记为已初始化
             this.isInitialized = true;
             
-            this.logger.info('Strategy initialized successfully');
+            this.logger.info('策略初始化成功');
             return true;
             
         } catch (error) {
-            this.logger.error('Failed to initialize strategy', error);
+            this.logger.error('策略初始化失败', error);
             return false;
         }
     }
@@ -222,13 +221,13 @@ class AvellanedaStrategy {
                 throw new Error('Unable to fetch ticker data');
             }
             
-            this.logger.info('Exchange connection validated', {
+            this.logger.info('交易所连接验证通过', {
                 status: status.status,
                 symbol: this.config.get('symbol'),
                 lastPrice: ticker.last
             });
         } catch (error) {
-            this.logger.error('Exchange connection validation failed', error);
+            this.logger.error('交易所连接验证失败', error);
             throw error;
         }
     }
@@ -243,14 +242,14 @@ class AvellanedaStrategy {
             }
             
             this.isRunning = true;
-            this.logger.info('Strategy started');
+            this.logger.info('策略已启动');
             
             // 开始主循环
             this.mainLoop();
             
             return true;
         } catch (error) {
-            this.logger.error('Failed to start strategy', error);
+            this.logger.error('策略启动失败', error);
             return false;
         }
     }
@@ -271,10 +270,10 @@ class AvellanedaStrategy {
             // 关闭交易所连接
             await this.exchangeManager.close();
             
-            this.logger.info('Strategy stopped');
+            this.logger.info('策略已停止');
             return true;
         } catch (error) {
-            this.logger.error('Failed to stop strategy', error);
+            this.logger.error('策略停止失败', error);
             return false;
         }
     }
@@ -288,7 +287,7 @@ class AvellanedaStrategy {
                 // 检查风险状态
                 const riskStatus = this.riskManager.getRiskStatus();
                 if (riskStatus.state.isEmergencyStop) {
-                    this.logger.warn('Strategy paused due to emergency stop');
+                    this.logger.warn('策略因紧急停止而暂停');
                     await this.sleep(10000); // 紧急停止时等待更长时间
                     continue;
                 }
@@ -298,14 +297,14 @@ class AvellanedaStrategy {
                     // 执行策略逻辑
                     await this.executeStrategy();
                 } else {
-                    this.logger.debug('Indicators not ready yet', this.indicators.getStatus());
+                    this.logger.debug('技术指标尚未准备就绪', this.indicators.getStatus());
                 }
                 
                 // 等待下一次更新
                 await this.sleep(this.config.get('updateInterval') || 1000);
                 
             } catch (error) {
-                this.logger.error('Error in main loop', error);
+                this.logger.error('主循环执行出错', error);
                 await this.sleep(5000); // 错误时等待更长时间
             }
         }
@@ -342,7 +341,7 @@ class AvellanedaStrategy {
             });
             
         } catch (error) {
-            this.logger.error('Failed to update market data', error);
+            this.logger.error('更新市场数据失败', error);
         }
     }
 
@@ -362,13 +361,13 @@ class AvellanedaStrategy {
                 timestamp: Date.now()
             };
             
-            this.logger.debug('Balances updated', {
+            this.logger.debug('余额已更新', {
                 baseAmount,
                 quoteAmount
             });
             
         } catch (error) {
-            this.logger.error('Failed to update balances', error);
+            this.logger.error('更新余额失败', error);
         }
     }
 
@@ -388,7 +387,7 @@ class AvellanedaStrategy {
             }
             
         } catch (error) {
-            this.logger.error('Failed to update indicators', error);
+            this.logger.error('更新技术指标失败', error);
         }
     }
 
@@ -408,7 +407,7 @@ class AvellanedaStrategy {
             );
             
             if (!calculatorState) {
-                this.logger.warn('Failed to update calculator state');
+                this.logger.warn('更新计算器状态失败');
                 return;
             }
             
@@ -422,11 +421,11 @@ class AvellanedaStrategy {
             // 更新风险管理器的持仓信息和账户总价值
             this.riskManager.updatePosition(
                 this.currentBalances.baseAmount,
-                calculatorState.inventoryValue.totalValue,
+                calculatorState.inventoryValue.baseValue, // 只使用基础货币价值，不包含计价货币
                 this.currentMarketData.midPrice
             );
             
-            // 更新账户总价值
+            // 更新账户总价值（用于计算最大持仓限制的基数）
             const totalAccountValue = calculatorState.inventoryValue.totalValue;
             this.riskManager.updateAccountValue(totalAccountValue);
             
@@ -439,7 +438,7 @@ class AvellanedaStrategy {
             this.logStrategyStatus();
             
         } catch (error) {
-            this.logger.error('Error executing strategy', error);
+            this.logger.error('执行策略时出错', error);
         }
     }
 
@@ -468,7 +467,7 @@ class AvellanedaStrategy {
      */
     async updateOrders() {
         try {
-            this.logger.info('Updating orders');
+            this.logger.info('正在更新订单');
             
             // 取消现有订单
             await this.cancelActiveOrders();
@@ -479,7 +478,7 @@ class AvellanedaStrategy {
             this.lastUpdateTime = Date.now();
             
         } catch (error) {
-            this.logger.error('Failed to update orders', error);
+            this.logger.error('更新订单失败', error);
         }
     }
 
