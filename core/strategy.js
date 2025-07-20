@@ -168,7 +168,30 @@ class AvellanedaStrategy {
      */
     handleConnectionRestored() {
         this.logger.info('交易所连接恢复，继续策略执行');
-        // 可以在这里添加连接恢复时的处理逻辑
+        // 连接恢复时同步挂单
+        this.syncActiveOrdersFromExchange();
+        // 可以在这里添加连接恢复时的其他处理逻辑
+    }
+
+    /**
+     * 从交易所同步当前挂单到本地activeOrders
+     */
+    async syncActiveOrdersFromExchange() {
+        try {
+            this.logger.info('开始同步交易所挂单到本地...');
+            const openOrders = await this.exchangeManager.getOpenOrders();
+            this.activeOrders.clear();
+            if (Array.isArray(openOrders)) {
+                for (const order of openOrders) {
+                    this.activeOrders.set(order.id, order);
+                }
+                this.logger.info(`同步完成，当前活跃挂单数: ${this.activeOrders.size}`);
+            } else {
+                this.logger.warn('未能获取到有效的挂单数据');
+            }
+        } catch (error) {
+            this.logger.error('同步交易所挂单失败', error);
+        }
     }
 
     /**
@@ -191,6 +214,9 @@ class AvellanedaStrategy {
             if (!riskInitialized) {
                 throw new Error('Failed to initialize risk manager');
             }
+            
+            // 挂单同步
+            await this.syncActiveOrdersFromExchange();
             
             // 标记为已初始化
             this.isInitialized = true;
