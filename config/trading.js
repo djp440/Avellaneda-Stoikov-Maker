@@ -5,13 +5,13 @@
 
 module.exports = {
     // 交易对配置
-    symbol: 'SOL/USDT',                    // 交易对符号，格式为 基础货币/计价货币
-    baseCurrency: 'SOL',                   // 基础货币，即被交易的货币
+    symbol: 'BTC/USDT',                    // 交易对符号，格式为 基础货币/计价货币
+    baseCurrency: 'BTC',                   // 基础货币，即被交易的货币
     quoteCurrency: 'USDT',                 // 计价货币，即用于计价的货币
 
     // 策略参数
     riskFactor: 0.2,                       // 风险因子，控制策略的激进程度，值越大风险越高
-    orderAmount: 0.01,                  // 单笔订单数量，以基础货币为单位
+    orderAmount: 0.000016,                  // 单笔订单数量，以基础货币为单位
     minSpread: 0.0011,                      // 最小价差，低于此值不会下单
     maxSpread: 0.03,                       // 最大价差，高于此值不会下单
     inventoryTarget: 0,                    // 库存目标，0表示中性，正数表示做多偏好，负数表示做空偏好
