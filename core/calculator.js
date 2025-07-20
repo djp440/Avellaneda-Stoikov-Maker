@@ -6,9 +6,10 @@ const Logger = require('../utils/logger');
  * 实现最优价差、最优价格和订单数量计算
  */
 class AvellanedaCalculator {
-    constructor(config) {
+    constructor(config, exchangeManager = null) {
         this.config = config;
         this.logger = new Logger(config);
+        this.exchangeManager = exchangeManager;
         
         // 核心参数
         this.gamma = config.get('riskFactor'); // 风险因子
@@ -24,7 +25,8 @@ class AvellanedaCalculator {
         this.logger.info('AvellanedaCalculator initialized', {
             gamma: this.gamma,
             eta: this.eta,
-            inventoryTargetBase: this.inventoryTargetBase
+            inventoryTargetBase: this.inventoryTargetBase,
+            hasExchangeManager: !!exchangeManager
         });
     }
 
@@ -90,28 +92,123 @@ class AvellanedaCalculator {
                 return { optimalBid: 0, optimalAsk: 0 };
             }
 
-            const halfSpread = optimalSpread / 2;
-            const optimalBid = midPrice - halfSpread;
-            const optimalAsk = midPrice + halfSpread;
+            // 获取交易所价格精度
+            let pricePrecision = 2; // 默认精度位数
+            let priceStep = 0.01; // 默认价格步长
             
-            // 格式化价格
-            const formattedBid = Helpers.formatPrice(optimalBid, this.config.get('pricePrecision') || 8);
-            const formattedAsk = Helpers.formatPrice(optimalAsk, this.config.get('pricePrecision') || 8);
+            if (this.exchangeManager) {
+                try {
+                    const marketInfo = this.exchangeManager.getMarketInfo();
+                    if (marketInfo && marketInfo.precision && marketInfo.precision.price !== undefined) {
+                        // CCXT中precision.price直接是价格步长，不是精度位数
+                        priceStep = marketInfo.precision.price;
+                        // 计算精度位数：例如 0.01 -> 2位小数
+                        pricePrecision = Math.abs(Math.floor(Math.log10(priceStep)));
+                    }
+                } catch (error) {
+                    this.logger.warn('无法获取交易所价格精度，使用默认值', { error: error.message });
+                }
+            }
+            
+            // 计算理论最优价格
+            const halfSpread = optimalSpread / 2;
+            const theoreticalBid = midPrice - halfSpread;
+            const theoreticalAsk = midPrice + halfSpread;
+            
+            // 考虑精度限制调整价格
+            const adjustedPrices = this.adjustPricesForPrecision(
+                theoreticalBid, 
+                theoreticalAsk, 
+                priceStep, 
+                optimalSpread
+            );
             
             this.logger.debug('Optimal prices calculated', {
                 midPrice,
                 optimalSpread,
-                optimalBid: formattedBid,
-                optimalAsk: formattedAsk
+                pricePrecision,
+                priceStep,
+                theoreticalBid,
+                theoreticalAsk,
+                adjustedBid: adjustedPrices.bid,
+                adjustedAsk: adjustedPrices.ask
             });
             
             return {
-                optimalBid: formattedBid,
-                optimalAsk: formattedAsk
+                optimalBid: adjustedPrices.bid,
+                optimalAsk: adjustedPrices.ask
             };
         } catch (error) {
             this.logger.error('Error calculating optimal prices', error);
             return { optimalBid: 0, optimalAsk: 0 };
+        }
+    }
+
+    /**
+     * 根据精度限制调整价格
+     * @param {number} theoreticalBid - 理论买价
+     * @param {number} theoreticalAsk - 理论卖价
+     * @param {number} priceStep - 价格步长
+     * @param {number} minSpread - 最小价差
+     * @returns {Object} {bid, ask} 调整后的价格
+     */
+    adjustPricesForPrecision(theoreticalBid, theoreticalAsk, priceStep, minSpread) {
+        try {
+            // 将价格对齐到价格步长
+            const alignedBid = Math.floor(theoreticalBid / priceStep) * priceStep;
+            const alignedAsk = Math.ceil(theoreticalAsk / priceStep) * priceStep;
+            
+            // 检查对齐后的价差是否满足最小要求
+            const alignedSpread = (alignedAsk - alignedBid) / ((alignedBid + alignedAsk) / 2);
+            
+            if (alignedSpread >= minSpread) {
+                // 价差满足要求，直接返回对齐后的价格
+                return { bid: alignedBid, ask: alignedAsk };
+            }
+            
+            // 价差不满足要求，需要调整
+            const midPrice = (alignedBid + alignedAsk) / 2;
+            const requiredSpread = minSpread * midPrice;
+            const halfRequiredSpread = requiredSpread / 2;
+            
+            // 计算满足最小价差的价格
+            let adjustedBid = Math.floor((midPrice - halfRequiredSpread) / priceStep) * priceStep;
+            let adjustedAsk = Math.ceil((midPrice + halfRequiredSpread) / priceStep) * priceStep;
+            
+            // 确保价格不为零或负数
+            if (adjustedBid <= 0) {
+                adjustedBid = priceStep;
+                adjustedAsk = Math.ceil((adjustedBid + requiredSpread) / priceStep) * priceStep;
+            }
+            
+            // 确保价格完全符合精度要求
+            adjustedBid = Math.round(adjustedBid / priceStep) * priceStep;
+            adjustedAsk = Math.round(adjustedAsk / priceStep) * priceStep;
+            
+            // 验证最终价差
+            const finalSpread = (adjustedAsk - adjustedBid) / ((adjustedBid + adjustedAsk) / 2);
+            
+            this.logger.debug('Prices adjusted for precision', {
+                theoreticalBid,
+                theoreticalAsk,
+                alignedBid,
+                alignedAsk,
+                alignedSpread,
+                adjustedBid,
+                adjustedAsk,
+                finalSpread,
+                minSpread,
+                priceStep
+            });
+            
+            return { bid: adjustedBid, ask: adjustedAsk };
+        } catch (error) {
+            this.logger.error('Error adjusting prices for precision', error);
+            // 出错时返回原始价格
+            return { 
+                bid: Math.round(theoreticalBid / priceStep) * priceStep, 
+                ask: Math.round(theoreticalAsk / priceStep) * priceStep 
+            };
         }
     }
 

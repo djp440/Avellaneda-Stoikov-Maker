@@ -1,111 +1,125 @@
 const StrategyConfig = require('../config/strategy');
-const AvellanedaStrategy = require('../core/strategy');
+const ExchangeManager = require('../core/exchange');
 
+/**
+ * 价格精度调试脚本
+ * 检查交易所返回的价格精度信息
+ */
 async function debugPrecision() {
-    console.log('🔍 开始调试市场精度问题...\n');
+    console.log('🔍 价格精度调试开始...\n');
     
     try {
-        // 1. 加载配置
-        console.log('📋 步骤1: 加载配置...');
+        // 初始化配置
         const config = new StrategyConfig();
-        const orderAmount = config.get('orderAmount');
-        console.log(`   配置中的ORDER_AMOUNT: ${orderAmount}`);
-        console.log(`   类型: ${typeof orderAmount}`);
-        console.log(`   数值: ${Number(orderAmount)}`);
-        console.log(`   科学计数法: ${Number(orderAmount).toExponential()}`);
-        console.log();
+        console.log('✅ 配置加载成功');
         
-        // 2. 创建策略实例
-        console.log('🧮 步骤2: 创建策略实例...');
-        const strategy = new AvellanedaStrategy(config);
-        await strategy.initialize();
-        console.log('   策略初始化完成');
-        console.log();
+        // 初始化交易所管理器
+        const exchangeManager = new ExchangeManager(config);
+        console.log('✅ 交易所管理器初始化成功');
         
-        // 3. 获取市场信息
-        console.log('📊 步骤3: 获取市场信息...');
-        const marketInfo = strategy.exchangeManager.getMarketInfo();
-        console.log('   市场信息:');
-        console.log(`     ${JSON.stringify(marketInfo, null, 2)}`);
-        console.log();
+        // 连接交易所
+        console.log('\n🔗 正在连接交易所...');
+        const connected = await exchangeManager.initialize();
+        if (!connected) {
+            throw new Error('交易所连接失败');
+        }
+        console.log('✅ 交易所连接成功');
         
-        if (marketInfo && marketInfo.precision) {
-            console.log('   精度信息:');
-            console.log(`     数量精度: ${marketInfo.precision.amount}`);
-            console.log(`     价格精度: ${marketInfo.precision.price}`);
-            console.log();
-            
-            // 4. 测试精度计算
-            console.log('🔧 步骤4: 测试精度计算...');
-            const amountPrecision = marketInfo.precision.amount;
-            const minAmount = Math.pow(10, -amountPrecision);
-            const adjustedBaseAmount = Math.max(orderAmount, minAmount * 10);
-            
-            console.log('   精度计算:');
-            console.log(`     数量精度: ${amountPrecision}位小数`);
-            console.log(`     最小数量: ${minAmount}`);
-            console.log(`     最小数量×10: ${minAmount * 10}`);
-            console.log(`     原始数量: ${orderAmount}`);
-            console.log(`     调整后数量: ${adjustedBaseAmount}`);
-            console.log(`     是否被调整: ${adjustedBaseAmount !== orderAmount ? '是' : '否'}`);
-            console.log();
-            
-            // 5. 检查是否有其他问题
-            console.log('🔍 步骤5: 检查其他可能的问题...');
-            
-            // 检查是否有其他地方修改了数量
-            console.log('   检查策略中的数量计算逻辑...');
-            
-            // 模拟策略中的计算过程
-            const baseAmount = orderAmount;
-            const amountPrecision2 = marketInfo.precision.amount;
-            const minAmount2 = Math.pow(10, -amountPrecision2);
-            const adjustedBaseAmount2 = Math.max(baseAmount, minAmount2 * 10);
-            
-            console.log('   策略中的计算:');
-            console.log(`     原始数量: ${baseAmount}`);
-            console.log(`     调整数量: ${adjustedBaseAmount2}`);
-            console.log(`     最小数量: ${minAmount2}`);
-            console.log(`     数量精度: ${amountPrecision2}位小数`);
-            console.log();
-            
-            // 6. 检查计算器中的处理
-            console.log('🧮 步骤6: 检查计算器处理...');
-            const calculator = strategy.calculator;
-            
-            // 模拟计算器中的计算
-            const testAmount = adjustedBaseAmount2;
-            console.log(`   传入计算器的数量: ${testAmount}`);
-            
-            // 检查formatAmount方法
-            if (calculator.formatAmount) {
-                const formattedAmount = calculator.formatAmount(testAmount);
-                console.log(`   格式化后数量: ${formattedAmount}`);
-                console.log(`   格式化是否改变数量: ${formattedAmount !== testAmount ? '是' : '否'}`);
-            }
-            console.log();
-            
-        } else {
-            console.log('   ❌ 无法获取市场精度信息');
+        // 获取市场信息
+        const marketInfo = exchangeManager.getMarketInfo();
+        console.log('\n📊 市场信息详情:');
+        console.log(`   交易对: ${marketInfo.symbol}`);
+        console.log(`   基础货币: ${marketInfo.base}`);
+        console.log(`   计价货币: ${marketInfo.quote}`);
+        console.log(`   是否活跃: ${marketInfo.active}`);
+        
+        console.log('\n🔧 精度信息:');
+        console.log(`   价格精度: ${marketInfo.precision.price}`);
+        console.log(`   数量精度: ${marketInfo.precision.amount}`);
+        console.log(`   价格精度类型: ${typeof marketInfo.precision.price}`);
+        console.log(`   数量精度类型: ${typeof marketInfo.precision.amount}`);
+        
+        console.log('\n📏 限制信息:');
+        console.log(`   价格限制:`, marketInfo.limits.price);
+        console.log(`   数量限制:`, marketInfo.limits.amount);
+        console.log(`   成本限制:`, marketInfo.limits.cost);
+        
+        // 测试价格步长计算
+        console.log('\n🧮 价格步长计算测试:');
+        const pricePrecision = marketInfo.precision.price;
+        const calculatedStep = Math.pow(10, -pricePrecision);
+        console.log(`   价格精度: ${pricePrecision}`);
+        console.log(`   计算步长: ${calculatedStep}`);
+        console.log(`   步长类型: ${typeof calculatedStep}`);
+        
+        // 测试价格格式化
+        console.log('\n🔧 价格格式化测试:');
+        const testPrices = [117825.99475, 117825.99525, 117825.99, 117826.00];
+        
+        for (const price of testPrices) {
+            const formatted = exchangeManager.formatPrice(price);
+            console.log(`   原始价格: ${price.toFixed(8)} → 格式化后: ${formatted.toFixed(8)}`);
         }
         
-        console.log('✅ 调试完成！');
+        // 测试价格对齐
+        console.log('\n🎯 价格对齐测试:');
+        const priceStep = calculatedStep;
+        const testPrice = 117825.99475;
+        
+        const floorAligned = Math.floor(testPrice / priceStep) * priceStep;
+        const ceilAligned = Math.ceil(testPrice / priceStep) * priceStep;
+        
+        console.log(`   测试价格: ${testPrice.toFixed(8)}`);
+        console.log(`   价格步长: ${priceStep.toFixed(8)}`);
+        console.log(`   向下对齐: ${floorAligned.toFixed(8)}`);
+        console.log(`   向上对齐: ${ceilAligned.toFixed(8)}`);
+        console.log(`   向下对齐余数: ${(testPrice % priceStep).toFixed(10)}`);
+        console.log(`   向上对齐余数: ${(ceilAligned - testPrice).toFixed(10)}`);
+        
+        // 检查CCXT原始市场信息
+        console.log('\n📋 CCXT原始市场信息:');
+        try {
+            const exchange = exchangeManager.exchange;
+            const symbol = config.get('symbol');
+            const market = exchange.market(symbol);
+            
+            console.log(`   市场对象:`, market);
+            console.log(`   精度信息:`, market.precision);
+            console.log(`   限制信息:`, market.limits);
+            
+            // 检查是否有其他精度相关字段
+            console.log('\n🔍 其他精度相关字段:');
+            for (const key in market) {
+                if (key.toLowerCase().includes('precision') || key.toLowerCase().includes('step')) {
+                    console.log(`   ${key}: ${market[key]}`);
+                }
+            }
+            
+        } catch (error) {
+            console.log(`   获取CCXT市场信息失败: ${error.message}`);
+        }
+        
+        // 关闭连接
+        await exchangeManager.close();
+        console.log('\n✅ 调试完成，连接已关闭');
         
     } catch (error) {
-        console.error('❌ 调试过程中出现错误:');
-        console.error(`   错误类型: ${error.constructor.name}`);
-        console.error(`   错误信息: ${error.message}`);
-        
+        console.error('\n❌ 调试失败:', error.message);
         if (error.stack) {
-            console.error('\n📚 错误堆栈:');
-            console.error(error.stack);
+            console.error('错误详情:', error.stack);
         }
     }
 }
 
 // 运行调试
 if (require.main === module) {
-    debugPrecision();
+    debugPrecision().then(() => {
+        console.log('\n🎯 价格精度调试结束');
+        process.exit(0);
+    }).catch((error) => {
+        console.error('\n💥 调试异常:', error);
+        process.exit(1);
+    });
 }
 
-module.exports = debugPrecision; 
+module.exports = { debugPrecision }; 

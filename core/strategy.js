@@ -14,9 +14,9 @@ class AvellanedaStrategy {
         this.logger = new Logger(config);
         
         // 初始化组件
-        this.calculator = new AvellanedaCalculator(config);
-        this.indicators = new IndicatorsManager(config);
         this.exchangeManager = new ExchangeManager(config);
+        this.calculator = new AvellanedaCalculator(config, this.exchangeManager);
+        this.indicators = new IndicatorsManager(config);
         this.riskManager = new RiskManager(config);
         
         // 策略状态
