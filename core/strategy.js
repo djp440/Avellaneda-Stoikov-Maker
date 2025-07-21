@@ -696,45 +696,26 @@ class AvellanedaStrategy extends EventEmitter {
         const { optimalBid, optimalAsk, optimalSpread, inventorySkew, targetInventory, currentInventory } = this.strategyState;
         const { midPrice, bestBid, bestAsk } = this.currentMarketData;
         const { baseAmount, quoteAmount } = this.currentBalances;
+        const indicators = this.indicators.getCurrentValues();
+        const riskStatus = this.riskManager.getRiskStatus();
         
         console.log('\n📊 策略状态:');
-        console.log('─'.repeat(50));
-        console.log(`💰 市场价格:`);
-        console.log(`   中间价: ${midPrice.toFixed(2)} USDT`);
-        console.log(`   最佳买价: ${bestBid.toFixed(2)} USDT`);
-        console.log(`   最佳卖价: ${bestAsk.toFixed(2)} USDT`);
-        console.log(`   市场价差: ${((bestAsk - bestBid) / midPrice * 100).toFixed(4)}%`);
+        console.log('─'.repeat(80));
         
-        console.log(`\n🎯 策略价格:`);
-        console.log(`   最优买价: ${optimalBid.toFixed(2)} USDT`);
-        console.log(`   最优卖价: ${optimalAsk.toFixed(2)} USDT`);
-        console.log(`   策略价差: ${(optimalSpread / midPrice * 100).toFixed(4)}%`);
+        // 市场价格 - 合并到两行
+        console.log(`💰 市场: 中间价 ${midPrice.toFixed(2)} | 买 ${bestBid.toFixed(2)} | 卖 ${bestAsk.toFixed(2)} | 价差 ${((bestAsk - bestBid) / midPrice * 100).toFixed(3)}%`);
+        console.log(`🎯 策略: 买价 ${optimalBid.toFixed(2)} | 卖价 ${optimalAsk.toFixed(2)} | 价差 ${(optimalSpread / midPrice * 100).toFixed(3)}% | 订单 ${this.activeOrders.size}个`);
         
-        console.log(`\n📦 库存信息:`);
-        console.log(`   当前库存: ${currentInventory.toFixed(8)} ${this.config.get('baseCurrency')}`);
-        console.log(`   目标库存: ${targetInventory.toFixed(8)} ${this.config.get('baseCurrency')}`);
-        console.log(`   库存偏差: ${(inventorySkew * 100).toFixed(4)}%`);
-        console.log(`   基础余额: ${baseAmount.toFixed(8)} ${this.config.get('baseCurrency')}`);
-        console.log(`   计价余额: ${quoteAmount.toFixed(2)} ${this.config.get('quoteCurrency')}`);
+        // 库存和余额 - 合并到一行
+        console.log(`📦 库存: 当前 ${currentInventory.toFixed(6)} | 目标 ${targetInventory.toFixed(6)} | 偏差 ${(inventorySkew * 100).toFixed(2)}% | ${this.config.get('baseCurrency')}`);
+        console.log(`💼 余额: ${baseAmount.toFixed(6)} ${this.config.get('baseCurrency')} | ${quoteAmount.toFixed(2)} ${this.config.get('quoteCurrency')}`);
         
-        // 显示技术指标
-        const indicators = this.indicators.getCurrentValues();
-        console.log(`\n📈 技术指标:`);
-        console.log(`   波动率: ${(indicators.volatility * 100).toFixed(4)}%`);
-        console.log(`   交易强度: ${indicators.tradingIntensity.toFixed(6)}`);
-        console.log(`   指标就绪: ${this.indicators.isReady() ? '✅' : '❌'}`);
+        // 技术指标和风险状态 - 合并显示
+        console.log(`📈 指标: 波动率 ${(indicators.volatility * 100).toFixed(3)}% | 交易强度 ${indicators.tradingIntensity.toFixed(4)} | 就绪 ${this.indicators.isReady() ? '✅' : '❌'}`);
+        console.log(`🛡️ 风险: 持仓 ${riskStatus.state.currentPosition.toFixed(6)} | 价值 ${riskStatus.state.currentPositionValue.toFixed(2)} | 总值 ${riskStatus.state.totalAccountValue.toFixed(2)}`);
+        console.log(`💹 盈亏: 未实现 ${riskStatus.state.unrealizedPnL.toFixed(2)} | 日盈亏 ${riskStatus.state.dailyPnL.toFixed(2)} | 紧急停止 ${riskStatus.state.isEmergencyStop ? '⚠️' : '✅'}`);
         
-        // 显示风险状态
-        const riskStatus = this.riskManager.getRiskStatus();
-        console.log(`\n🛡️ 风险状态:`);
-        console.log(`   当前持仓: ${riskStatus.state.currentPosition.toFixed(8)} ${this.config.get('baseCurrency')}`);
-        console.log(`   持仓价值: ${riskStatus.state.currentPositionValue.toFixed(2)} USDT`);
-        console.log(`   账户总值: ${riskStatus.state.totalAccountValue.toFixed(2)} USDT`);
-        console.log(`   未实现盈亏: ${riskStatus.state.unrealizedPnL.toFixed(2)} USDT`);
-        console.log(`   日盈亏: ${riskStatus.state.dailyPnL.toFixed(2)} USDT`);
-        console.log(`   紧急停止: ${riskStatus.state.isEmergencyStop ? '⚠️ 是' : '✅ 否'}`);
-        
-        console.log('─'.repeat(50));
+        console.log('─'.repeat(80));
     }
 
     /**
@@ -745,11 +726,7 @@ class AvellanedaStrategy extends EventEmitter {
         const timeSinceLastUpdate = (now - this.lastUpdateTime) / 1000;
         const timeUntilNextUpdate = this.orderRefreshTime - timeSinceLastUpdate;
         
-        console.log(`\n⏰ 订单更新状态:`);
-        console.log(`   距离上次更新: ${timeSinceLastUpdate.toFixed(1)}秒`);
-        console.log(`   距离下次更新: ${timeUntilNextUpdate.toFixed(1)}秒`);
-        console.log(`   指标变化: ${this.indicators.hasChanged() ? '✅ 有变化' : '❌ 无变化'}`);
-        console.log(`   活跃订单: ${this.activeOrders.size}个`);
+        console.log(`⏰ 更新: 上次 ${timeSinceLastUpdate.toFixed(1)}s | 下次 ${timeUntilNextUpdate.toFixed(1)}s | 指标变化 ${this.indicators.hasChanged() ? '✅' : '❌'} | 活跃订单 ${this.activeOrders.size}个`);
     }
 
     /**

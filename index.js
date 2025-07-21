@@ -20,15 +20,11 @@ class AvellanedaMarketMaking {
      * 打印启动横幅
      */
     printStartupBanner() {
-        console.log('\n' + '='.repeat(80));
+        console.log('\n' + '='.repeat(70));
         console.log('🚀 Avellaneda 做市策略启动器');
-        console.log('='.repeat(80));
-        console.log(`📅 启动时间: ${new Date().toLocaleString('zh-CN')}`);
-        console.log(`🔧 调试模式: ${this.debugMode ? '启用' : '禁用'}`);
-        console.log(`🌍 环境: ${process.env.NODE_ENV || 'development'}`);
-        console.log(`📊 Node.js版本: ${process.version}`);
-        console.log(`💾 内存: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`);
-        console.log('='.repeat(80) + '\n');
+        console.log('='.repeat(70));
+        console.log(`📅 ${new Date().toLocaleString('zh-CN')} | 🔧 调试 ${this.debugMode ? '✅' : '❌'} | 🌍 ${process.env.NODE_ENV || 'dev'} | 📊 ${process.version} | 💾 ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`);
+        console.log('='.repeat(70) + '\n');
     }
 
     /**
@@ -38,44 +34,22 @@ class AvellanedaMarketMaking {
         if (!this.debugMode) return;
         
         console.log('📋 配置摘要:');
-        console.log('─'.repeat(40));
+        console.log('─'.repeat(70));
         
         const config = this.config.getAll();
         
-        // 交易所配置
-        console.log('🏢 交易所配置:');
-        console.log(`   交易所: ${config.exchange.name}`);
-        console.log(`   API密钥: ${config.exchange.apiKey ? '✅ 已配置' : '❌ 未配置'}`);
-        console.log(`   密钥: ${config.exchange.secret ? '✅ 已配置' : '❌ 未配置'}`);
-        console.log(`   Passphrase: ${config.exchange.password ? '✅ 已配置' : '❌ 未配置'}`);
-        console.log(`   沙盒模式: ${config.exchange.sandbox ? '✅ 启用' : '❌ 禁用'}`);
+        // 交易所和交易配置 - 合并显示
+        const apiStatus = `${config.exchange.apiKey ? '✅' : '❌'}API ${config.exchange.secret ? '✅' : '❌'}密钥 ${config.exchange.password ? '✅' : '❌'}Pass`;
+        console.log(`🏢 交易所: ${config.exchange.name} | ${apiStatus} | 沙盒 ${config.exchange.sandbox ? '✅' : '❌'}`);
+        console.log(`💰 交易: ${config.symbol} | 风险因子 ${config.riskFactor} | 订单金额 ${config.orderAmount}`);
+        console.log(`📊 价差: 最小 ${config.minSpread} | 最大 ${config.maxSpread} | 更新间隔 ${config.updateInterval}ms`);
         
-        // 交易配置
-        console.log('\n💰 交易配置:');
-        console.log(`   交易对: ${config.symbol}`);
-        console.log(`   基础货币: ${config.baseCurrency}`);
-        console.log(`   计价货币: ${config.quoteCurrency}`);
-        console.log(`   风险因子: ${config.riskFactor}`);
-        console.log(`   订单金额: ${config.orderAmount}`);
-        console.log(`   最小价差: ${config.minSpread}`);
-        console.log(`   最大价差: ${config.maxSpread}`);
+        // 执行和风险配置 - 合并显示
+        console.log(`⚙️ 执行: 最大订单 ${config.maxOrders} | 超时 ${config.orderTimeout}ms | 成交延迟 ${config.filledOrderDelay}ms`);
+        console.log(`🛡️ 风险: 仓位 ${config.maxPositionSizePercent}% | 价值 ${config.maxPositionValuePercent}% | 止损 ${config.stopLossPercent}%`);
+        console.log(`📉 限制: 回撤 ${config.maxDrawdown}% | 日亏损 ${config.maxDailyLossPercent}%`);
         
-        // 执行配置
-        console.log('\n⚙️ 执行配置:');
-        console.log(`   更新间隔: ${config.updateInterval}ms`);
-        console.log(`   最大订单数: ${config.maxOrders}`);
-        console.log(`   订单超时: ${config.orderTimeout}ms`);
-        console.log(`   成交延迟: ${config.filledOrderDelay}ms`);
-        
-        // 风险管理配置
-        console.log('\n🛡️ 风险管理:');
-        console.log(`   最大仓位比例: ${config.maxPositionSizePercent}%`);
-        console.log(`   最大仓位价值: ${config.maxPositionValuePercent}%`);
-        console.log(`   止损比例: ${config.stopLossPercent}%`);
-        console.log(`   最大回撤: ${config.maxDrawdown}%`);
-        console.log(`   日最大亏损: ${config.maxDailyLossPercent}%`);
-        
-        console.log('─'.repeat(40) + '\n');
+        console.log('─'.repeat(70) + '\n');
     }
 
     /**
@@ -87,17 +61,17 @@ class AvellanedaMarketMaking {
             console.log('🔧 开始初始化 Avellaneda 做市策略...\n');
             
             // 步骤1: 初始化配置
-            console.log('📋 步骤 1/5: 加载配置...');
+            process.stdout.write('📋 1/5 加载配置...');
             this.config = new StrategyConfig();
-            console.log('✅ 配置加载完成');
+            console.log(' ✅');
             
             // 打印配置摘要
             this.printConfigSummary();
             
             // 步骤2: 初始化日志
-            console.log('📝 步骤 2/5: 初始化日志系统...');
+            process.stdout.write('📝 2/5 初始化日志...');
             this.logger = new Logger(this.config);
-            console.log('✅ 日志系统初始化完成');
+            console.log(' ✅');
             
             // 记录启动信息
             this.logger.info('策略初始化开始', {
@@ -111,19 +85,19 @@ class AvellanedaMarketMaking {
             });
 
             // 步骤3: 验证配置
-            console.log('🔍 步骤 3/5: 验证配置...');
+            process.stdout.write('🔍 3/5 验证配置...');
             this.validateConfiguration();
-            console.log('✅ 配置验证通过');
+            console.log(' ✅');
             
             // 步骤4: 初始化策略
-            console.log('🧮 步骤 4/5: 初始化策略算法...');
+            process.stdout.write('🧮 4/5 初始化策略...');
             await this.initializeStrategy();
-            console.log('✅ 策略算法初始化完成');
+            console.log(' ✅');
             
             // 步骤5: 设置配置监听
-            console.log('👂 步骤 5/5: 设置配置监听...');
+            process.stdout.write('👂 5/5 设置监听...');
             this.setupConfigWatchers();
-            console.log('✅ 配置监听设置完成');
+            console.log(' ✅');
             
             this.logger.info('策略初始化完成', {
                 totalSteps: 5,
@@ -131,7 +105,7 @@ class AvellanedaMarketMaking {
             });
             
             console.log('\n🎉 策略初始化完成！');
-            console.log('─'.repeat(40));
+            console.log('─'.repeat(50));
             
             return true;
         } catch (error) {
