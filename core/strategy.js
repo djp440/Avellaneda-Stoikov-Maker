@@ -27,6 +27,7 @@ class AvellanedaStrategy extends EventEmitter {
         this.lastUpdateTime = 0;
         this.orderRefreshTime = (config.get('orderTimeout') || 30000) / 1000; // 订单刷新时间(秒)
         this.filledOrderDelay = config.get('filledOrderDelay') || 1; // 订单成交后延迟(秒)
+        this.forceOrderUpdate = false; // 强制更新订单标志
         
         // 订单管理
         this.activeOrders = new Map(); // 活跃订单
@@ -729,7 +730,15 @@ class AvellanedaStrategy extends EventEmitter {
     printOrderUpdateStatus() {
         const now = Date.now();
         const timeSinceLastUpdate = (now - this.lastUpdateTime) / 1000;
-        const timeUntilNextUpdate = this.orderRefreshTime - timeSinceLastUpdate;
+        let timeUntilNextUpdate = this.orderRefreshTime - timeSinceLastUpdate;
+        
+        // 如果是强制更新状态或lastUpdateTime为0，显示特殊状态
+        if (this.forceOrderUpdate || this.lastUpdateTime === 0) {
+            timeUntilNextUpdate = 0; // 立即更新
+        }
+        
+        // 确保下次更新时间不为负数
+        timeUntilNextUpdate = Math.max(0, timeUntilNextUpdate);
         
         // 计算价格变化
         const { optimalBid, optimalAsk } = this.strategyState;
@@ -747,7 +756,10 @@ class AvellanedaStrategy extends EventEmitter {
             priceChangeInfo = '价格变化 首次 ✅';
         }
         
-        console.log(`⏰ 更新: 上次 ${timeSinceLastUpdate.toFixed(1)}s | 下次 ${timeUntilNextUpdate.toFixed(1)}s | 指标变化 ${this.indicators.hasChanged() ? '✅' : '❌'} | ${priceChangeInfo} | 活跃订单 ${this.activeOrders.size}个`);
+        // 添加强制更新状态显示
+        const forceUpdateInfo = this.forceOrderUpdate ? ' [强制更新]' : '';
+        
+        console.log(`⏰ 更新: 上次 ${timeSinceLastUpdate.toFixed(1)}s | 下次 ${timeUntilNextUpdate.toFixed(1)}s${forceUpdateInfo} | 指标变化 ${this.indicators.hasChanged() ? '✅' : '❌'} | ${priceChangeInfo} | 活跃订单 ${this.activeOrders.size}个`);
     }
 
     /**
@@ -756,6 +768,12 @@ class AvellanedaStrategy extends EventEmitter {
     shouldUpdateOrders() {
         const now = Date.now();
         const timeSinceLastUpdate = (now - this.lastUpdateTime) / 1000;
+        
+        // 如果标记了强制更新，直接返回true
+        if (this.forceOrderUpdate) {
+            this.logger.info('检测到强制更新标志，立即更新订单');
+            return true;
+        }
         
         // 检查订单刷新时间
         if (timeSinceLastUpdate < this.orderRefreshTime) {
@@ -1214,12 +1232,18 @@ class AvellanedaStrategy extends EventEmitter {
             this.riskManager.updateRealizedPnL(realizedPnL);
             this.logger.info('已实现盈亏已更新', { orderId: order.id, realizedPnL: realizedPnL });
             
+            // 标记需要强制更新订单（订单成交后立即更新）
+            this.forceOrderUpdate = true;
+            
             // 延迟创建新订单
-            this.logger.info(`订单成交后延迟 ${this.filledOrderDelay} 秒，然后更新订单`);
+            this.logger.info(`订单成交后延迟 ${this.filledOrderDelay} 秒，然后强制更新订单`);
             setTimeout(async () => {
                 if (this.isRunning) {
-                    this.logger.info('延迟结束，开始更新订单...');
+                    this.logger.info('延迟结束，开始强制更新订单...');
+                    // 重置lastUpdateTime以确保立即更新
+                    this.lastUpdateTime = 0;
                     await this.updateOrders();
+                    this.forceOrderUpdate = false;
                 } else {
                     this.logger.warn('策略未运行，跳过延迟后的订单更新');
                 }
