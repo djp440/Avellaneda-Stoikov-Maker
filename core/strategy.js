@@ -456,28 +456,35 @@ class AvellanedaStrategy extends EventEmitter {
      * 主循环
      */
     async mainLoop() {
-        console.log('AvellanedaStrategy: mainLoop() 开始');
+        console.log('🚀 Avellaneda策略主循环启动');
         const loopTimeout = 30000; // 30秒超时
         let lastLoopTime = Date.now();
+        let loopCount = 0;
+        
         while (this.isRunning) {
             try {
-                console.log(`AvellanedaStrategy: mainLoop() - 循环开始 (上次循环时间: ${new Date(lastLoopTime).toISOString()})`);
+                loopCount++;
+                const loopStartTime = Date.now();
+                const timeSinceLastLoop = (loopStartTime - lastLoopTime) / 1000;
+                
+                console.log(`\n🔄 [循环 #${loopCount}] 开始 | 间隔 ${timeSinceLastLoop.toFixed(1)}s | 时间 ${new Date().toLocaleTimeString()}`);
+                
                 const loopPromise = (async () => {
                     // 检查循环超时
                     const currentTime = Date.now();
                     if (currentTime - lastLoopTime > loopTimeout) {
                         this.logger.warn('主循环超时，重新开始循环');
-                        console.warn('AvellanedaStrategy: mainLoop() - 主循环超时，重新开始循环');
+                        console.log('⚠️ 主循环超时，重新开始');
                         lastLoopTime = currentTime;
                     }
+                    
                     // 检查风险状态
                     const riskStatus = this.riskManager.getRiskStatus();
                     if (riskStatus.state.isEmergencyStop) {
                         this.logger.error('策略因紧急停止而终止');
-                        console.error('AvellanedaStrategy: mainLoop() - 策略因紧急停止而终止');
-                        this.isRunning = false; // 立即停止主循环
+                        console.log('🛑 策略因紧急停止而终止');
+                        this.isRunning = false;
                         
-                        // 发出策略停止事件，通知其他组件
                         this.emit('strategyStopped', {
                             reason: 'Emergency stop triggered',
                             timestamp: new Date().toISOString(),
@@ -485,39 +492,43 @@ class AvellanedaStrategy extends EventEmitter {
                         });
                         return;
                     }
-                    // 检查指标是否准备就绪
+                    
+                    // 检查指标是否准备就绪并执行策略
                     if (this.indicators.isReady()) {
-                        console.log('AvellanedaStrategy: mainLoop() - 指标已准备就绪，执行策略...');
                         await this.executeStrategy();
-                        console.log('AvellanedaStrategy: mainLoop() - 策略执行完成');
                     } else {
                         this.logger.debug('技术指标尚未准备就绪', this.indicators.getStatus());
-                        console.log('AvellanedaStrategy: mainLoop() - 技术指标尚未准备就绪');
+                        console.log('⏳ 技术指标尚未准备就绪，跳过策略执行');
                     }
+                    
                     lastLoopTime = Date.now();
+                    const loopDuration = (lastLoopTime - loopStartTime) / 1000;
+                    console.log(`✅ [循环 #${loopCount}] 完成 | 耗时 ${loopDuration.toFixed(2)}s`);
                 })();
-                // 增加超时保护，防止单次循环卡死
+                
+                // 增加超时保护
                 await Promise.race([
                     loopPromise,
-                    this.sleep(loopTimeout + 1000).then(() => { // 增加一点缓冲时间
+                    this.sleep(loopTimeout + 1000).then(() => {
                         this.logger.error('主循环单次迭代超时，强制跳过');
-                        console.error('AvellanedaStrategy: mainLoop() - 主循环单次迭代超时，强制跳过');
+                        console.log('⚠️ 主循环迭代超时，强制跳过');
                     })
                 ]);
+                
                 const updateInterval = this.config.get('updateInterval') || 1000;
-                console.log(`AvellanedaStrategy: mainLoop() - 等待 ${updateInterval}ms 后进行下一次循环`);
                 await this.sleep(updateInterval);
+                
             } catch (error) {
                 this.logger.error('主循环执行出错', {
                     errorName: error.name,
                     errorMessage: error.message,
                     stack: error.stack
                 });
-                console.error('AvellanedaStrategy: mainLoop() - 主循环执行出错:', error.message);
-                await this.sleep(5000); // 错误时等待更长时间
+                console.log(`❌ [循环 #${loopCount}] 执行出错: ${error.message}`);
+                await this.sleep(5000);
             }
         }
-        console.log('AvellanedaStrategy: mainLoop() 停止');
+        console.log('🛑 Avellaneda策略主循环停止');
     }
 
     /**
@@ -674,10 +685,9 @@ class AvellanedaStrategy extends EventEmitter {
             
             // 检查是否需要更新订单
             if (this.shouldUpdateOrders()) {
-                console.log('\n🔄 开始更新订单...');
+                console.log('🔄 更新订单中...');
                 await this.updateOrders();
             } else {
-                // 显示为什么不需要更新订单
                 this.printOrderUpdateStatus();
             }
             
@@ -699,23 +709,8 @@ class AvellanedaStrategy extends EventEmitter {
         const indicators = this.indicators.getCurrentValues();
         const riskStatus = this.riskManager.getRiskStatus();
         
-        console.log('\n📊 策略状态:');
-        console.log('─'.repeat(80));
-        
-        // 市场价格 - 合并到两行
-        console.log(`💰 市场: 中间价 ${midPrice.toFixed(2)} | 买 ${bestBid.toFixed(2)} | 卖 ${bestAsk.toFixed(2)} | 价差 ${((bestAsk - bestBid) / midPrice * 100).toFixed(3)}%`);
-        console.log(`🎯 策略: 买价 ${optimalBid.toFixed(2)} | 卖价 ${optimalAsk.toFixed(2)} | 价差 ${(optimalSpread / midPrice * 100).toFixed(3)}% | 订单 ${this.activeOrders.size}个`);
-        
-        // 库存和余额 - 合并到一行
-        console.log(`📦 库存: 当前 ${currentInventory.toFixed(6)} | 目标 ${targetInventory.toFixed(6)} | 偏差 ${(inventorySkew * 100).toFixed(2)}% | ${this.config.get('baseCurrency')}`);
-        console.log(`💼 余额: ${baseAmount.toFixed(6)} ${this.config.get('baseCurrency')} | ${quoteAmount.toFixed(2)} ${this.config.get('quoteCurrency')}`);
-        
-        // 技术指标和风险状态 - 合并显示
-        console.log(`📈 指标: 波动率 ${(indicators.volatility * 100).toFixed(3)}% | 交易强度 ${indicators.tradingIntensity.toFixed(4)} | 就绪 ${this.indicators.isReady() ? '✅' : '❌'}`);
-        console.log(`🛡️ 风险: 持仓 ${riskStatus.state.currentPosition.toFixed(6)} | 价值 ${riskStatus.state.currentPositionValue.toFixed(2)} | 总值 ${riskStatus.state.totalAccountValue.toFixed(2)}`);
-        console.log(`💹 盈亏: 未实现 ${riskStatus.state.unrealizedPnL.toFixed(2)} | 日盈亏 ${riskStatus.state.dailyPnL.toFixed(2)} | 紧急停止 ${riskStatus.state.isEmergencyStop ? '⚠️' : '✅'}`);
-        
-        console.log('─'.repeat(80));
+        // 超紧凑的单行状态显示
+        console.log(`📊 市场 ${midPrice.toFixed(2)} (${bestBid.toFixed(2)}/${bestAsk.toFixed(2)}) | 策略 ${optimalBid.toFixed(2)}/${optimalAsk.toFixed(2)} | 库存 ${currentInventory.toFixed(4)}/${targetInventory.toFixed(4)} (${(inventorySkew * 100).toFixed(1)}%) | 波动率 ${(indicators.volatility * 100).toFixed(2)}% | 订单 ${this.activeOrders.size}个 | 盈亏 ${riskStatus.state.unrealizedPnL.toFixed(2)}`);
     }
 
     /**
@@ -755,8 +750,6 @@ class AvellanedaStrategy extends EventEmitter {
     async updateOrders() {
         this.logger.info('开始执行 updateOrders 流程');
         try {
-            console.log('🔄 正在更新订单...');
-            
             // 取消现有订单
             this.logger.info('调用 cancelActiveOrders 取消现有订单');
             await this.cancelActiveOrders();
@@ -767,6 +760,7 @@ class AvellanedaStrategy extends EventEmitter {
             
             this.lastUpdateTime = Date.now();
             this.logger.info('订单更新流程完成', { lastUpdateTime: new Date(this.lastUpdateTime).toISOString() });
+            console.log('✅ 订单更新完成');
             
         } catch (error) {
             this.logger.error('更新订单失败', {
@@ -774,6 +768,7 @@ class AvellanedaStrategy extends EventEmitter {
                 errorMessage: error.message,
                 stack: error.stack
             });
+            console.log(`❌ 订单更新失败: ${error.message}`);
         }
     }
 

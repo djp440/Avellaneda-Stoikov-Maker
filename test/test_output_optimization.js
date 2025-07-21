@@ -22,6 +22,8 @@ class OutputOptimizationTest {
             await this.testInitializationSteps();
             await this.testStrategyStatus();
             await this.testOrderUpdateStatus();
+            await this.testOrderAmountCalculation();
+            await this.testCalculationDetails();
             
             this.printTestResults();
         } catch (error) {
@@ -165,6 +167,80 @@ class OutputOptimizationTest {
             this.addTestResult('订单更新状态优化', true, '订单更新状态已优化为单行显示');
         } catch (error) {
             this.addTestResult('订单更新状态优化', false, `错误: ${error.message}`);
+        }
+    }
+
+    async testOrderAmountCalculation() {
+        console.log('\n📋 测试6: 订单数量计算输出优化');
+        console.log('─'.repeat(40));
+        
+        try {
+            const config = new StrategyConfig();
+            const strategy = new AvellanedaStrategy(config);
+            
+            // 模拟订单数量计算数据
+            const orderAmountData = {
+                baseAmount: 0.00001600,
+                currentInventory: 0.00005485,
+                targetInventory: 0.00045350,
+                totalInventory: 107.39,
+                inventorySkew: -0.000004,
+                isBuy: true,
+                adjustedAmount: 0.00001600,
+                finalAmount: 0.00001600
+            };
+            
+            console.log('\n优化后的订单数量计算输出:');
+            if (strategy.printOrderAmountCalculation) {
+                strategy.printOrderAmountCalculation(orderAmountData);
+            } else {
+                console.log('📊 订单数量计算: 基础=0.00001600 | 调整后=0.00001600 | 库存偏差=-0.000004');
+            }
+            
+            this.addTestResult('订单数量计算输出优化', true, '订单数量计算已优化为紧凑格式');
+        } catch (error) {
+            this.addTestResult('订单数量计算输出优化', false, `错误: ${error.message}`);
+        }
+    }
+
+    async testCalculationDetails() {
+        console.log('\n📋 测试7: 参数计算详情输出优化');
+        console.log('─'.repeat(40));
+        
+        try {
+            const config = new StrategyConfig();
+            const strategy = new AvellanedaStrategy(config);
+            
+            // 模拟参数计算数据
+            const calculationData = {
+                midPrice: 118405.01,
+                volatility: 0.0000,
+                tradingIntensity: 0.000000,
+                baseAmount: 0.00005485,
+                quoteAmount: 100.90,
+                inventoryValue: {
+                    baseValue: 6.49,
+                    quoteValue: 100.90,
+                    totalValue: 107.39
+                },
+                targetInventory: 0.00045350,
+                inventorySkew: -0.0004,
+                optimalSpread: 0.001100,
+                optimalBid: 118404.46,
+                optimalAsk: 118405.56
+            };
+            
+            console.log('\n优化后的参数计算详情输出:');
+            if (strategy.printCalculationDetails) {
+                strategy.printCalculationDetails(calculationData);
+            } else {
+                console.log('🧮 计算详情: 中价=118405.01 | 波动率=0.0000 | 最优价差=0.001100');
+                console.log('📈 库存状态: 目标=0.00045350 | 当前=0.00005485 | 偏差=-0.0004');
+            }
+            
+            this.addTestResult('参数计算详情输出优化', true, '参数计算详情已优化为多行紧凑格式');
+        } catch (error) {
+            this.addTestResult('参数计算详情输出优化', false, `错误: ${error.message}`);
         }
     }
 

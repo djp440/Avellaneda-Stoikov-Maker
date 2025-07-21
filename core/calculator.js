@@ -388,42 +388,27 @@ class AvellanedaCalculator {
         console.log(`\n📦 ${isBuy ? '买单' : '卖单'}数量计算:`);
         console.log('─'.repeat(40));
         
-        console.log('📊 基础参数:');
-        console.log(`   基础数量: ${baseAmount.toFixed(8)} BTC`);
-        console.log(`   当前库存: ${currentInventory.toFixed(8)} BTC`);
-        console.log(`   目标库存: ${targetInventory.toFixed(8)} BTC`);
-        console.log(`   总库存价值: ${totalInventory.toFixed(2)} USDT`);
+        console.log(`📊 基础参数: 原始数量 ${baseAmount.toFixed(8)} | 当前库存 ${currentInventory.toFixed(8)} | 目标库存 ${targetInventory.toFixed(8)} | 总库存价值 ${totalInventory.toFixed(2)} USDT`);
         
-        console.log('\n🎯 库存偏差:');
-        console.log(`   偏差值: ${inventorySkew.toFixed(6)}`);
-        console.log(`   偏差百分比: ${(inventorySkew * 100).toFixed(4)}%`);
-        
-        console.log('\n🔧 形状因子调整:');
-        console.log(`   形状因子(η): ${this.eta}`);
-        console.log(`   调整前数量: ${baseAmount.toFixed(8)} BTC`);
+        console.log(`🎯 库存偏差: ${inventorySkew.toFixed(6)} (${(inventorySkew * 100).toFixed(4)}%)`);
         
         // 计算调整因子
         let adjustmentFactor = 1;
+        let adjustmentDesc = '无需调整';
         if (isBuy && inventorySkew > 0) {
             adjustmentFactor = Math.exp(-this.eta * inventorySkew);
-            console.log(`   调整因子: exp(-${this.eta} × ${inventorySkew.toFixed(6)}) = ${adjustmentFactor.toFixed(6)}`);
+            adjustmentDesc = `exp(-${this.eta} × ${inventorySkew.toFixed(6)}) = ${adjustmentFactor.toFixed(6)}`;
         } else if (!isBuy && inventorySkew < 0) {
             adjustmentFactor = Math.exp(this.eta * inventorySkew);
-            console.log(`   调整因子: exp(${this.eta} × ${inventorySkew.toFixed(6)}) = ${adjustmentFactor.toFixed(6)}`);
-        } else {
-            console.log(`   调整因子: 1.000000 (无需调整)`);
+            adjustmentDesc = `exp(${this.eta} × ${inventorySkew.toFixed(6)}) = ${adjustmentFactor.toFixed(6)}`;
         }
         
-        console.log(`   调整后数量: ${adjustedAmount.toFixed(8)} BTC`);
+        console.log(`🔧 形状因子调整: η=${this.eta} | 调整因子 ${adjustmentDesc} | 调整后数量 ${adjustedAmount.toFixed(8)} BTC`);
         
-        console.log('\n📏 数量限制:');
         const maxPosition = this.config.get('maxPosition') || 1.0;
-        console.log(`   最大持仓限制: ${maxPosition.toFixed(8)} BTC`);
-        console.log(`   限制后数量: ${adjustedAmount.toFixed(8)} BTC`);
+        console.log(`📏 数量限制: 最大持仓 ${maxPosition.toFixed(8)} BTC | 限制后数量 ${adjustedAmount.toFixed(8)} BTC`);
         
-        console.log('\n🎯 最终结果:');
-        console.log(`   格式化数量: ${finalAmount.toFixed(8)} BTC`);
-        console.log(`   订单价值: ${(finalAmount * (isBuy ? this.optimalBid : this.optimalAsk)).toFixed(2)} USDT`);
+        console.log(`🎯 最终结果: 格式化数量 ${finalAmount.toFixed(8)} BTC | 订单价值 ${(finalAmount * (isBuy ? this.optimalBid : this.optimalAsk)).toFixed(2)} USDT`);
         
         console.log('─'.repeat(40));
     }
@@ -584,36 +569,17 @@ class AvellanedaCalculator {
         console.log('\n🧮 参数计算详情:');
         console.log('─'.repeat(50));
         
-        console.log('📊 输入参数:');
-        console.log(`   中间价: ${midPrice.toFixed(2)} USDT`);
-        console.log(`   波动率: ${(volatility * 100).toFixed(4)}%`);
-        console.log(`   交易强度: ${tradingIntensity.toFixed(6)}`);
-        console.log(`   基础余额: ${baseAmount.toFixed(8)} BTC`);
-        console.log(`   计价余额: ${quoteAmount.toFixed(2)} USDT`);
+        console.log(`📊 输入参数: 中间价 ${midPrice.toFixed(2)} USDT | 波动率 ${(volatility * 100).toFixed(4)}% | 交易强度 ${tradingIntensity.toFixed(6)} | 基础余额 ${baseAmount.toFixed(8)} BTC | 计价余额 ${quoteAmount.toFixed(2)} USDT`);
         
-        console.log('\n💰 库存价值计算:');
-        console.log(`   基础货币价值: ${inventoryValue.baseValue.toFixed(2)} USDT`);
-        console.log(`   计价货币价值: ${inventoryValue.quoteValue.toFixed(2)} USDT`);
-        console.log(`   总价值: ${inventoryValue.totalValue.toFixed(2)} USDT`);
+        console.log(`💰 库存价值计算: 基础货币价值 ${inventoryValue.baseValue.toFixed(2)} USDT | 计价货币价值 ${inventoryValue.quoteValue.toFixed(2)} USDT | 总价值 ${inventoryValue.totalValue.toFixed(2)} USDT`);
         
-        console.log('\n🎯 库存管理:');
-        console.log(`   当前库存: ${baseAmount.toFixed(8)} BTC`);
-        console.log(`   目标库存: ${targetInventory.toFixed(8)} BTC`);
-        console.log(`   库存偏差: ${(inventorySkew * 100).toFixed(4)}%`);
+        console.log(`🎯 库存管理: 当前库存 ${baseAmount.toFixed(8)} BTC | 目标库存 ${targetInventory.toFixed(8)} BTC | 库存偏差 ${(inventorySkew * 100).toFixed(4)}%`);
         
-        console.log('\n📈 最优价差计算:');
-        console.log(`   风险因子(γ): ${this.gamma}`);
-        console.log(`   形状因子(η): ${this.eta}`);
-        console.log(`   时间项: ${(this.gamma * Math.pow(volatility, 2) * 0).toFixed(6)}`);
-        console.log(`   强度项: ${((2 / this.gamma) * Math.log(1 + this.gamma / tradingIntensity)).toFixed(6)}`);
-        console.log(`   最优价差: ${optimalSpread.toFixed(6)}`);
-        console.log(`   价差百分比: ${(optimalSpread / midPrice * 100).toFixed(4)}%`);
+        const timeComponent = (this.gamma * Math.pow(volatility, 2) * 0).toFixed(6);
+        const intensityComponent = ((2 / this.gamma) * Math.log(1 + this.gamma / tradingIntensity)).toFixed(6);
+        console.log(`📈 最优价差计算: γ=${this.gamma} | η=${this.eta} | 时间项 ${timeComponent} | 强度项 ${intensityComponent} | 最优价差 ${optimalSpread.toFixed(6)} (${(optimalSpread / midPrice * 100).toFixed(4)}%)`);
         
-        console.log('\n💱 最优价格计算:');
-        console.log(`   价差的一半: ${(optimalSpread / 2).toFixed(6)}`);
-        console.log(`   最优买价: ${optimalBid.toFixed(2)} USDT`);
-        console.log(`   最优卖价: ${optimalAsk.toFixed(2)} USDT`);
-        console.log(`   价格差: ${(optimalAsk - optimalBid).toFixed(2)} USDT`);
+        console.log(`💱 最优价格计算: 价差的一半 ${(optimalSpread / 2).toFixed(6)} | 最优买价 ${optimalBid.toFixed(2)} USDT | 最优卖价 ${optimalAsk.toFixed(2)} USDT | 价格差 ${(optimalAsk - optimalBid).toFixed(2)} USDT`);
         
         console.log('─'.repeat(50));
     }
@@ -635,4 +601,4 @@ class AvellanedaCalculator {
     }
 }
 
-module.exports = AvellanedaCalculator; 
+module.exports = AvellanedaCalculator;
