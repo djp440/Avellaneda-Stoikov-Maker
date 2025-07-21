@@ -6,8 +6,16 @@ const Helpers = require('../utils/helpers');
 const Logger = require('../utils/logger');
 const EventEmitter = require('events');
 
+// 导入策略子模块
+const EventHandler = require('./strategy/event-handler');
+const OrderManager = require('./strategy/order-manager');
+const DataManager = require('./strategy/data-manager');
+const StrategyCore = require('./strategy/strategy-core');
+const LifecycleManager = require('./strategy/lifecycle-manager');
+
 /**
  * Avellaneda做市策略核心逻辑
+ * 重构后的版本，使用模块化架构
  */
 class AvellanedaStrategy extends EventEmitter {
     constructor(config) {
@@ -15,25 +23,24 @@ class AvellanedaStrategy extends EventEmitter {
         this.config = config;
         this.logger = new Logger(config);
         
-        // 初始化组件
+        // 初始化核心组件
         this.exchangeManager = new ExchangeManager(config);
         this.calculator = new AvellanedaCalculator(config, this.exchangeManager);
         this.indicators = new IndicatorsManager(config);
         this.riskManager = new RiskManager(config);
         
+        // 初始化策略子模块
+        this.eventHandler = new EventHandler(this);
+        this.orderManager = new OrderManager(this);
+        this.dataManager = new DataManager(this);
+        this.strategyCore = new StrategyCore(this);
+        this.lifecycleManager = new LifecycleManager(this);
+        
         // 策略状态
         this.isRunning = false;
         this.isInitialized = false;
         this.lastUpdateTime = 0;
-        this.orderRefreshTime = (config.get('orderTimeout') || 30000) / 1000; // 订单刷新时间(秒)
-        this.filledOrderDelay = config.get('filledOrderDelay') || 1; // 订单成交后延迟(秒)
         this.forceOrderUpdate = false; // 强制更新订单标志
-        this.isCreatingOrders = false; // 订单创建并发保护标志
-        
-        // 订单管理
-        this.activeOrders = new Map(); // 活跃订单
-        this.orderHistory = []; // 订单历史
-        this.lastOrderId = 0;
         
         // 市场数据
         this.currentMarketData = {
@@ -50,278 +57,54 @@ class AvellanedaStrategy extends EventEmitter {
             timestamp: 0
         };
         
-        // 策略状态
+        // 策略状态数据
         this.strategyState = {
+            currentPrice: 0,
+            volatility: 0,
+            currentInventory: 0,
+            targetInventory: 0,
+            totalInventoryValue: 0,
             optimalBid: 0,
             optimalAsk: 0,
-            optimalSpread: 0,
-            inventorySkew: 0,
-            targetInventory: 0,
-            currentInventory: 0,
-            totalInventoryValue: 0
+            currentSpread: 0,
+            lastCalculationTime: 0,
+            executionCount: 0,
+            averageExecutionTime: 0
         };
         
-        // 上次订单价格记录（用于避免无意义的订单更新）
-        this.lastOrderPrices = {
-            bid: 0,
-            ask: 0,
-            timestamp: 0
-        };
-        
-        // 价格变化阈值配置
-        this.priceChangeThreshold = config.get('priceChangeThreshold') || 0.001; // 默认0.1%的价格变化阈值
-        
-        // 设置交易所事件监听
-        this.setupExchangeEventListeners();
-        
-        // 设置风险管理器事件监听
-        this.setupRiskManagerEventListeners();
-        
-        // 订单监控配置
-        this.orderMonitoringInterval = config.get('orderMonitoringInterval') || 5000; // 默认5秒检查一次
-        this.orderMonitoringTimer = null;
-        
-        this.logger.info('Avellaneda策略已初始化', {
-            orderRefreshTime: this.orderRefreshTime,
-            filledOrderDelay: this.filledOrderDelay,
-            orderMonitoringInterval: this.orderMonitoringInterval,
-            riskManager: 'enabled'
+        this.logger.info('Avellaneda策略实例已创建（模块化版本）', {
+            symbol: config.get('symbol'),
+            modules: ['EventHandler', 'OrderManager', 'DataManager', 'StrategyCore', 'LifecycleManager']
         });
-    }
-
-    /**
-     * 设置交易所事件监听
-     */
-    setupExchangeEventListeners() {
-        // 监听订单簿更新
-        this.exchangeManager.on('orderBookUpdate', (data) => {
-            this.handleOrderBookUpdate(data);
-        });
-
-        // 监听价格更新
-        this.exchangeManager.on('tickerUpdate', (data) => {
-            this.handleTickerUpdate(data);
-        });
-
-        // 监听余额更新
-        this.exchangeManager.on('balanceUpdate', (data) => {
-            this.handleBalanceUpdate(data);
-        });
-
-        // 监听订单更新
-        this.exchangeManager.on('orderUpdate', (data) => {
-            this.handleOrderUpdate(data);
-        });
-
-        // 监听连接状态变化
-        this.exchangeManager.on('connectionLost', () => {
-            this.handleConnectionLost();
-        });
-
-        this.exchangeManager.on('connectionRestored', () => {
-            this.handleConnectionRestored();
-        });
-    }
-
-    /**
-     * 设置风险管理器事件监听
-     */
-    setupRiskManagerEventListeners() {
-        // 监听紧急停止事件
-        this.riskManager.on('emergencyStop', (data) => {
-            this.handleEmergencyStop(data);
-        });
-
-        // 监听策略停止事件
-        this.riskManager.on('stopStrategy', (data) => {
-            this.handleStrategyStop(data);
-        });
-    }
-
-    /**
-     * 处理订单簿更新
-     */
-    handleOrderBookUpdate(data) {
-        try {
-            this.currentMarketData = {
-                midPrice: data.midPrice,
-                bestBid: data.bids[0][0],
-                bestAsk: data.asks[0][0],
-                orderBook: {
-                    bids: data.bids,
-                    asks: data.asks
-                },
-                timestamp: data.timestamp
-            };
-
-            // 更新技术指标
-            this.updateIndicators();
-            
-        } catch (error) {
-            this.logger.error('处理订单簿更新时出错', error);
-        }
-    }
-
-    /**
-     * 处理价格更新
-     */
-    handleTickerUpdate(data) {
-        try {
-            // 更新最新价格
-            this.currentMarketData.lastPrice = data.last;
-            this.currentMarketData.timestamp = data.timestamp;
-            
-        } catch (error) {
-            this.logger.error('处理价格更新时出错', error);
-        }
-    }
-
-    /**
-     * 处理余额更新
-     */
-    handleBalanceUpdate(data) {
-        try {
-            this.currentBalances = {
-                baseAmount: data.base.free,
-                quoteAmount: data.quote.free,
-                timestamp: data.timestamp
-            };
-            
-        } catch (error) {
-            this.logger.error('处理余额更新时出错', error);
-        }
-    }
-
-    /**
-     * 处理连接丢失
-     */
-    handleConnectionLost() {
-        this.logger.warn('交易所连接丢失，暂停策略执行');
-        // 可以在这里添加连接丢失时的处理逻辑
-    }
-
-    /**
-     * 处理连接恢复
-     */
-    handleConnectionRestored() {
-        this.logger.info('交易所连接恢复，继续策略执行');
-        // 连接恢复时同步挂单
-        this.syncActiveOrdersFromExchange();
-        // 可以在这里添加连接恢复时的其他处理逻辑
-    }
-
-    /**
-     * 处理紧急停止事件
-     */
-    handleEmergencyStop(data) {
-        this.logger.error('收到紧急停止信号', data);
-        console.error(`策略: 收到紧急停止信号 - ${data.reason}`);
-        
-        // 立即停止策略
-        this.isRunning = false;
-        
-        // 发射事件通知主程序
-        this.emit('emergencyStop', data);
-    }
-
-    /**
-     * 处理策略停止事件
-     */
-    handleStrategyStop(data) {
-        this.logger.warn('收到策略停止信号', data);
-        console.warn(`策略: 收到策略停止信号 - ${data.reason}`);
-        
-        // 停止策略运行
-        this.isRunning = false;
-        
-        // 发射事件通知主程序
-        this.emit('strategyStop', data);
-    }
-
-    /**
-     * 从交易所同步当前挂单到本地activeOrders（增强容错处理）
-     */
-    async syncActiveOrdersFromExchange() {
-        try {
-            this.logger.info('开始同步交易所挂单到本地...');
-            const openOrders = await this.exchangeManager.getOpenOrders();
-            
-            // 只有在成功获取到订单数据时才清空本地状态
-            if (openOrders !== null) {
-                const previousOrderCount = this.activeOrders.size;
-                this.activeOrders.clear();
-                
-                if (Array.isArray(openOrders)) {
-                    for (const order of openOrders) {
-                        this.activeOrders.set(order.id, order);
-                    }
-                    this.logger.info(`同步完成，当前活跃挂单数: ${this.activeOrders.size}`, {
-                        previousCount: previousOrderCount,
-                        currentCount: this.activeOrders.size,
-                        syncSuccess: true
-                    });
-                } else {
-                    this.logger.warn('获取到的挂单数据格式无效', {
-                        dataType: typeof openOrders,
-                        data: openOrders
-                    });
-                }
-            } else {
-                this.logger.warn('无法获取订单状态，保持现有本地状态不变', {
-                    currentActiveOrders: this.activeOrders.size,
-                    reason: '网络连接问题或交易所未连接',
-                    syncSuccess: false
-                });
-                console.log(`⚠️ 网络问题，保持现有订单状态: ${this.activeOrders.size}个`);
-            }
-        } catch (error) {
-            this.logger.error('同步交易所挂单失败，保持现有本地状态', {
-                error: error.message,
-                currentActiveOrders: this.activeOrders.size,
-                syncSuccess: false
-            });
-            console.log(`❌ 订单同步失败，保持现有状态: ${this.activeOrders.size}个`);
-        }
     }
 
     /**
      * 初始化策略
      */
     async initialize() {
-        console.log('AvellanedaStrategy: initialize() 开始');
+        if (this.isInitialized) {
+            this.logger.warn('策略已初始化，跳过重复初始化');
+            return true;
+        }
+        
         try {
-            this.logger.info('正在初始化策略');
+            this.logger.info('开始初始化Avellaneda策略...');
             
-            console.log('AvellanedaStrategy: initialize() - 初始化交易所连接...');
+            // 验证配置
+            if (!this.validateConfig()) {
+                throw new Error('配置验证失败');
+            }
+            
             // 初始化交易所连接
-            const exchangeInitialized = await this.exchangeManager.initialize();
-            if (!exchangeInitialized) {
-                console.error('AvellanedaStrategy: initialize() - 交易所连接初始化失败');
-                throw new Error('Failed to initialize exchange connection');
+            await this.exchangeManager.initialize();
+            
+            // 验证交易所连接
+            if (!await this.validateExchangeConnection()) {
+                throw new Error('交易所连接验证失败');
             }
-            console.log('AvellanedaStrategy: initialize() - 交易所连接初始化完成');
             
-            // 技术指标管理器不需要显式初始化，在构造函数中已经初始化
-            
-            console.log('AvellanedaStrategy: initialize() - 初始化风险管理器...');
-            // 初始化风险管理器
-            const riskInitialized = await this.riskManager.initialize();
-            if (!riskInitialized) {
-                console.error('AvellanedaStrategy: initialize() - 风险管理器初始化失败');
-                throw new Error('Failed to initialize risk manager');
-            }
-            console.log('AvellanedaStrategy: initialize() - 风险管理器初始化完成');
-            
-            console.log('AvellanedaStrategy: initialize() - 同步活跃订单...');
-            // 挂单同步
-            await this.syncActiveOrdersFromExchange();
-            console.log('AvellanedaStrategy: initialize() - 活跃订单同步完成');
-            
-            // 标记为已初始化
             this.isInitialized = true;
-            
-            this.logger.info('策略初始化成功');
-            console.log('AvellanedaStrategy: initialize() 成功完成');
+            this.logger.info('Avellaneda策略初始化完成');
             return true;
             
         } catch (error) {
@@ -330,9 +113,24 @@ class AvellanedaStrategy extends EventEmitter {
                 errorMessage: error.message,
                 stack: error.stack
             });
-            console.error('AvellanedaStrategy: initialize() 失败:', error.message);
             return false;
         }
+    }
+
+    /**
+     * 验证配置
+     */
+    validateConfig() {
+        const requiredFields = ['symbol', 'orderAmount', 'riskAversion'];
+        
+        for (const field of requiredFields) {
+            if (!this.config.get(field)) {
+                this.logger.error('缺少必需的配置字段', { field });
+                return false;
+            }
+        }
+        
+        return true;
     }
 
     /**
@@ -340,26 +138,24 @@ class AvellanedaStrategy extends EventEmitter {
      */
     async validateExchangeConnection() {
         try {
-            // 检查交易所状态
-            const status = await this.exchangeManager.fetchStatus();
-            if (!status.status || status.status !== 'ok') {
-                throw new Error(`Exchange status: ${status.status}`);
-            }
-            
-            // 检查交易对信息
-            const ticker = await this.exchangeManager.fetchTicker(this.config.get('symbol'));
+            // 测试基本连接
+            const ticker = await this.exchangeManager.getTicker();
             if (!ticker || !ticker.last) {
-                throw new Error('Unable to fetch ticker data');
+                throw new Error('无法获取价格数据');
             }
             
-            this.logger.info('交易所连接验证通过', {
-                status: status.status,
-                symbol: this.config.get('symbol'),
-                lastPrice: ticker.last
-            });
+            // 测试余额查询
+            const balances = await this.exchangeManager.getBalances();
+            if (!balances) {
+                throw new Error('无法获取账户余额');
+            }
+            
+            this.logger.info('交易所连接验证成功');
+            return true;
+            
         } catch (error) {
-            this.logger.error('交易所连接验证失败', error);
-            throw error;
+            this.logger.error('交易所连接验证失败', { error: error.message });
+            return false;
         }
     }
 
@@ -367,1204 +163,187 @@ class AvellanedaStrategy extends EventEmitter {
      * 启动策略
      */
     async start() {
-        console.log('AvellanedaStrategy: start() 开始');
-        try {
-            if (!this.isInitialized) {
-                console.error('AvellanedaStrategy: start() - 策略未初始化');
-                throw new Error('Strategy not initialized');
+        if (!this.isInitialized) {
+            if (!await this.initialize()) {
+                throw new Error('策略初始化失败');
             }
-            
-            this.isRunning = true;
-            this.logger.info('策略已启动');
-            console.log('AvellanedaStrategy: start() - 策略已启动');
-            
-            console.log('AvellanedaStrategy: start() - 开始主循环...');
-            // 开始主循环
-            this.mainLoop();
-            console.log('AvellanedaStrategy: start() - 主循环已启动');
-            
-            // 启动订单监控
-            this.startOrderMonitoring();
-            console.log('AvellanedaStrategy: start() - 订单监控已启动');
-            
-            console.log('AvellanedaStrategy: start() 成功完成');
-            return true;
-        } catch (error) {
-            this.logger.error('策略启动失败', {
-                errorName: error.name,
-                errorMessage: error.message,
-                stack: error.stack
-            });
-            console.error('AvellanedaStrategy: start() 失败:', error.message);
-            return false;
         }
+        
+        return await this.lifecycleManager.start();
     }
 
     /**
      * 停止策略
      */
-    
     async stop() {
-        try {
-            if (!this.isRunning || this.isShuttingDown) {
-                this.logger.warn('策略未在运行或正在关闭中');
-                console.log('⚠️ 策略未在运行或正在关闭中');
-                return;
-            }
-
-            this.isShuttingDown = true;
-            console.log('\n🛑 开始停止策略...\n');
-            this.logger.info('停止策略');
-            
-            // 停止订单监控
-            this.stopOrderMonitoring();
-            console.log('✅ 订单监控已停止');
-
-            // 注意：健康检查由主程序管理，策略类不直接控制
-
-            // 停止策略
-            if (this.strategy) {
-                console.log('🎯 停止策略算法...');
-                await this.strategy.stop();
-                console.log('✅ 策略算法已停止');
-            }
-
-            // 清理交易所连接
-            if (this.exchangeManager) {
-                console.log('🏢 清理交易所连接...');
-                await this.exchangeManager.close();
-                console.log('✅ 交易所连接已清理');
-            }
-
-            // 清理网络管理器
-            if (this.networkManager) {
-                console.log('🌐 清理网络管理器...');
-                this.networkManager.close();
-                console.log('✅ 网络管理器已清理');
-            }
-
-            // 标记为停止状态
-            this.isRunning = false;
-            this.isShuttingDown = false;
-
-            // 记录策略状态
-            const uptime = this.startTime ? Date.now() - this.startTime : 0;
-            this.logger.strategyStatus('stopped', {
-                timestamp: new Date().toISOString(),
-                uptime: uptime
-            });
-
-            console.log('\n✅ 策略停止成功！');
-            console.log('─'.repeat(40));
-            console.log(`📅 停止时间: ${new Date().toLocaleString('zh-CN')}`);
-            console.log(`⏱️ 运行时长: ${Math.round(uptime / 1000)}秒`);
-            console.log('─'.repeat(40) + '\n');
-            
-            this.logger.info('策略停止成功');
-
-        } catch (error) {
-            this.logger.errorWithStack('策略停止失败', error);
-            
-            console.error('\n❌ 策略停止失败:');
-            console.error(`   错误类型: ${error.constructor.name}`);
-            console.error(`   错误信息: ${error.message}`);
-            
-            if (this.debugMode && error.stack) {
-                console.error('\n📚 错误堆栈:');
-                console.error(error.stack);
-            }
-            
-            // 强制清理
-            this.forceCleanup();
-            
-            throw error;
-        }
+        return await this.lifecycleManager.stop();
     }
 
     /**
-     * 强制清理资源
+     * 暂停策略
      */
-    forceCleanup() {
-        try {
-            // 强制停止所有定时器
-            if (this.healthCheckInterval) {
-                clearInterval(this.healthCheckInterval);
-                this.healthCheckInterval = null;
-            }
-            
-            // 强制停止策略
-            this.isRunning = false;
-            this.isShuttingDown = false;
-            
-            console.log('🧹 强制清理完成');
-        } catch (error) {
-            console.error('❌ 强制清理失败:', error.message);
-        }
+    pause() {
+        return this.lifecycleManager.pause();
     }
 
     /**
-     * 主循环
+     * 恢复策略
      */
-    async mainLoop() {
-        console.log('🚀 Avellaneda策略主循环启动');
-        const loopTimeout = 30000; // 30秒超时
-        let lastLoopTime = Date.now();
-        let loopCount = 0;
-        
-        while (this.isRunning) {
-            try {
-                loopCount++;
-                const loopStartTime = Date.now();
-                const timeSinceLastLoop = (loopStartTime - lastLoopTime) / 1000;
-                
-                console.log(`\n🔄 [循环 #${loopCount}] 开始 | 间隔 ${timeSinceLastLoop.toFixed(1)}s | 时间 ${new Date().toLocaleTimeString()}`);
-                
-                const loopPromise = (async () => {
-                    // 检查循环超时
-                    const currentTime = Date.now();
-                    if (currentTime - lastLoopTime > loopTimeout) {
-                        this.logger.warn('主循环超时，重新开始循环');
-                        console.log('⚠️ 主循环超时，重新开始');
-                        lastLoopTime = currentTime;
-                    }
-                    
-                    // 检查风险状态
-                    const riskStatus = this.riskManager.getRiskStatus();
-                    if (riskStatus.state.isEmergencyStop) {
-                        this.logger.error('策略因紧急停止而终止');
-                        console.log('🛑 策略因紧急停止而终止');
-                        this.isRunning = false;
-                        
-                        this.emit('strategyStopped', {
-                            reason: 'Emergency stop triggered',
-                            timestamp: new Date().toISOString(),
-                            riskStatus: riskStatus.state
-                        });
-                        return;
-                    }
-                    
-                    // 检查指标是否准备就绪并执行策略
-                    if (this.indicators.isReady()) {
-                        await this.executeStrategy();
-                    } else {
-                        this.logger.debug('技术指标尚未准备就绪', this.indicators.getStatus());
-                        console.log('⏳ 技术指标尚未准备就绪，跳过策略执行');
-                    }
-                    
-                    lastLoopTime = Date.now();
-                    const loopDuration = (lastLoopTime - loopStartTime) / 1000;
-                    console.log(`✅ [循环 #${loopCount}] 完成 | 耗时 ${loopDuration.toFixed(2)}s`);
-                })();
-                
-                // 增加超时保护
-                await Promise.race([
-                    loopPromise,
-                    this.sleep(loopTimeout + 1000).then(() => {
-                        this.logger.error('主循环单次迭代超时，强制跳过');
-                        console.log('⚠️ 主循环迭代超时，强制跳过');
-                    })
-                ]);
-                
-                const updateInterval = this.config.get('updateInterval') || 1000;
-                await this.sleep(updateInterval);
-                
-            } catch (error) {
-                this.logger.error('主循环执行出错', {
-                    errorName: error.name,
-                    errorMessage: error.message,
-                    stack: error.stack
-                });
-                console.log(`❌ [循环 #${loopCount}] 执行出错: ${error.message}`);
-                await this.sleep(5000);
-            }
-        }
-        console.log('🛑 Avellaneda策略主循环停止');
+    resume() {
+        return this.lifecycleManager.resume();
     }
 
     /**
-     * 更新市场数据
+     * 强制清理
      */
-    async updateMarketData() {
-        try {
-            // 获取订单簿
-            const orderBook = await this.exchangeManager.fetchOrderBook(this.config.get('symbol'));
-            
-            // 获取最新价格
-            const ticker = await this.exchangeManager.fetchTicker(this.config.get('symbol'));
-            
-            // 验证数据有效性
-            if (!orderBook || !orderBook.bids || !orderBook.asks || 
-                orderBook.bids.length === 0 || orderBook.asks.length === 0) {
-                throw new Error('Invalid order book data received');
-            }
-            
-            if (!ticker || !ticker.last) {
-                throw new Error('Invalid ticker data received');
-            }
-            
-            // 计算中间价
-            const midPrice = Helpers.calculateMidPrice(orderBook.bids[0][0], orderBook.asks[0][0]);
-            
-            this.currentMarketData = {
-                midPrice,
-                bestBid: orderBook.bids[0][0],
-                bestAsk: orderBook.asks[0][0],
-                orderBook,
-                lastPrice: ticker.last,
-                timestamp: Date.now()
-            };
-            
-            this.logger.debug('Market data updated', {
-                midPrice,
-                bestBid: this.currentMarketData.bestBid,
-                bestAsk: this.currentMarketData.bestAsk,
-                lastPrice: ticker.last
-            });
-            
-        } catch (error) {
-            this.logger.error('更新市场数据失败', error);
-            
-            // 检查当前市场数据是否过期（超过30秒）
-            if (this.currentMarketData && 
-                Date.now() - this.currentMarketData.timestamp > 30000) {
-                this.logger.warn('市场数据已过期，暂停策略执行');
-                // 可以考虑设置一个标志来暂停策略执行
-                this.currentMarketData = null;
-            }
-        }
-    }
-
-    /**
-     * 更新账户余额
-     */
-    async updateBalances() {
-        try {
-            const balances = await this.exchangeManager.fetchBalance();
-            
-            const baseAmount = balances[this.config.get('baseCurrency')]?.free || 0;
-            const quoteAmount = balances[this.config.get('quoteCurrency')]?.free || 0;
-            
-            this.currentBalances = {
-                baseAmount,
-                quoteAmount,
-                timestamp: Date.now()
-            };
-            
-            this.logger.debug('余额已更新', {
-                baseAmount,
-                quoteAmount
-            });
-            
-        } catch (error) {
-            this.logger.error('更新余额失败', error);
-        }
-    }
-
-    /**
-     * 更新技术指标
-     */
-    updateIndicators() {
-        try {
-            const { midPrice, orderBook, timestamp } = this.currentMarketData;
-            
-            // 更新波动率指标
-            this.indicators.updatePrice(midPrice, timestamp);
-            
-            // 更新交易强度指标
-            if (orderBook && orderBook.bids && orderBook.asks) {
-                this.indicators.updateOrderBook(orderBook.bids, orderBook.asks, timestamp);
-            }
-            
-        } catch (error) {
-            this.logger.error('更新技术指标失败', error);
-        }
-    }
-
-    /**
-     * 执行策略逻辑
-     */
-    async executeStrategy() {
-        try {
-            // 定期同步订单状态（每10次循环同步一次）
-            if (!this.syncCounter) this.syncCounter = 0;
-            this.syncCounter++;
-            if (this.syncCounter >= 10) {
-                this.syncCounter = 0;
-                await this.syncActiveOrdersFromExchange();
-            }
-
-            // 检查市场数据有效性
-            if (!this.currentMarketData) {
-                this.logger.warn('市场数据不可用，跳过策略执行');
-                return;
-            }
-            
-            // 检查市场数据是否过期（超过30秒）
-            if (Date.now() - this.currentMarketData.timestamp > 30000) {
-                this.logger.warn('市场数据已过期，跳过策略执行');
-                return;
-            }
-            
-            // 获取当前指标值
-            const indicators = this.indicators.getCurrentValues();
-            
-            // 更新计算器状态
-            const calculatorState = this.calculator.updateState(
-                this.currentMarketData,
-                indicators,
-                this.currentBalances
-            );
-            
-            if (!calculatorState) {
-                this.logger.warn('更新计算器状态失败');
-                return;
-            }
-            
-            // 更新策略状态
-            this.strategyState = {
-                ...calculatorState,
-                currentInventory: this.currentBalances.baseAmount,
-                totalInventoryValue: calculatorState.inventoryValue.totalValue
-            };
-            
-            // 更新风险管理器的持仓信息和账户总价值
-            this.riskManager.updatePosition(
-                this.currentBalances.baseAmount,
-                calculatorState.inventoryValue.baseValue, // 只使用基础货币价值，不包含计价货币
-                this.currentMarketData.midPrice
-            );
-            
-            // 更新账户总价值（用于计算最大持仓限制的基数）
-            const totalAccountValue = calculatorState.inventoryValue.totalValue;
-            this.riskManager.updateAccountValue(totalAccountValue);
-            
-            // 打印策略状态信息
-            this.printStrategyStatus();
-            
-            // 检查是否需要更新订单
-            if (this.shouldUpdateOrders()) {
-                console.log('🔄 更新订单中...');
-                await this.updateOrders();
-            } else {
-                this.printOrderUpdateStatus();
-            }
-            
-            // 记录策略状态
-            this.logStrategyStatus();
-            
-        } catch (error) {
-            this.logger.error('执行策略时出错', error);
-        }
-    }
-
-    /**
-     * 打印策略状态信息
-     */
-    printStrategyStatus() {
-        const { optimalBid, optimalAsk, optimalSpread, inventorySkew, targetInventory, currentInventory } = this.strategyState;
-        const { midPrice, bestBid, bestAsk } = this.currentMarketData;
-        const { baseAmount, quoteAmount } = this.currentBalances;
-        const indicators = this.indicators.getCurrentValues();
-        const riskStatus = this.riskManager.getRiskStatus();
-        
-        // 超紧凑的单行状态显示
-        console.log(`📊 市场 ${midPrice.toFixed(2)} (${bestBid.toFixed(2)}/${bestAsk.toFixed(2)}) | 策略 ${optimalBid.toFixed(2)}/${optimalAsk.toFixed(2)} | 库存 ${currentInventory.toFixed(4)}/${targetInventory.toFixed(4)} (${(inventorySkew * 100).toFixed(1)}%) | 波动率 ${(indicators.volatility * 100).toFixed(2)}% | 订单 ${this.activeOrders.size}个 | 盈亏 ${riskStatus.state.unrealizedPnL.toFixed(2)}`);
-    }
-
-    /**
-     * 打印订单更新状态
-     */
-    printOrderUpdateStatus() {
-        const now = Date.now();
-        const timeSinceLastUpdate = (now - this.lastUpdateTime) / 1000;
-        let timeUntilNextUpdate = this.orderRefreshTime - timeSinceLastUpdate;
-        
-        // 如果是强制更新状态或lastUpdateTime为0，显示特殊状态
-        if (this.forceOrderUpdate || this.lastUpdateTime === 0) {
-            timeUntilNextUpdate = 0; // 立即更新
-        }
-        
-        // 确保下次更新时间不为负数
-        timeUntilNextUpdate = Math.max(0, timeUntilNextUpdate);
-        
-        // 计算价格变化
-        const { optimalBid, optimalAsk } = this.strategyState;
-        const { bid: lastBid, ask: lastAsk } = this.lastOrderPrices;
-        let priceChangeInfo = '';
-        
-        if (lastBid > 0 && lastAsk > 0) {
-            const bidChangePercent = Math.abs((optimalBid - lastBid) / lastBid);
-            const askChangePercent = Math.abs((optimalAsk - lastAsk) / lastAsk);
-            const maxChange = Math.max(bidChangePercent, askChangePercent);
-            const thresholdMet = maxChange >= this.priceChangeThreshold;
-            
-            priceChangeInfo = `价格变化 ${(maxChange * 100).toFixed(3)}%/${(this.priceChangeThreshold * 100).toFixed(1)}% ${thresholdMet ? '✅' : '❌'}`;
-        } else {
-            priceChangeInfo = '价格变化 首次 ✅';
-        }
-        
-        // 添加强制更新状态显示
-        const forceUpdateInfo = this.forceOrderUpdate ? ' [强制更新]' : '';
-        
-        console.log(`⏰ 更新: 上次 ${timeSinceLastUpdate.toFixed(1)}s | 下次 ${timeUntilNextUpdate.toFixed(1)}s${forceUpdateInfo} | 指标变化 ${this.indicators.hasChanged() ? '✅' : '❌'} | ${priceChangeInfo} | 活跃订单 ${this.activeOrders.size}个`);
-    }
-
-    /**
-     * 检查是否需要更新订单
-     */
-    shouldUpdateOrders() {
-        const now = Date.now();
-        const timeSinceLastUpdate = (now - this.lastUpdateTime) / 1000;
-        
-        // 如果标记了强制更新，直接返回true
-        if (this.forceOrderUpdate) {
-            this.logger.info('检测到强制更新标志，立即更新订单');
-            return true;
-        }
-        
-        // 智能订单管理：允许的情况下最多1个买单和1个卖单存在
-        // 检查当前余额，确定应该有哪些类型的订单
-        const balances = this.exchangeManager.getBalances();
-        const { optimalBid, optimalAsk } = this.strategyState;
-        
-        // 计算订单数量
-        const baseAmount = this.config.get('orderAmount');
-        const buyAmount = this.calculator.calculateOrderAmount(
-            baseAmount, this.strategyState.currentInventory, 
-            this.strategyState.targetInventory, this.strategyState.totalInventoryValue, true
-        );
-        const sellAmount = this.calculator.calculateOrderAmount(
-            baseAmount, this.strategyState.currentInventory, 
-            this.strategyState.targetInventory, this.strategyState.totalInventoryValue, false
-        );
-        
-        // 检查是否可以创建买单和卖单
-        const canCreateBuy = buyAmount > 0 && optimalBid > 0 && 
-            this.riskManager.validateOrder('buy', buyAmount, optimalBid, balances).valid;
-        const canCreateSell = sellAmount > 0 && optimalAsk > 0 && 
-            this.riskManager.validateOrder('sell', sellAmount, optimalAsk, balances).valid;
-        
-        // 计算当前活跃订单类型
-        let activeBuyOrders = 0;
-        let activeSellOrders = 0;
-        for (const order of this.activeOrders.values()) {
-            if (order.side === 'buy') activeBuyOrders++;
-            else if (order.side === 'sell') activeSellOrders++;
-        }
-        
-        // 检查是否需要补充订单（智能策略：只在允许的情况下要求对应订单存在）
-        const needBuyOrder = canCreateBuy && activeBuyOrders === 0;
-        const needSellOrder = canCreateSell && activeSellOrders === 0;
-        
-        if (needBuyOrder || needSellOrder) {
-            this.logger.info('检测到需要补充订单（智能策略）', {
-                activeBuyOrders,
-                activeSellOrders,
-                canCreateBuy,
-                canCreateSell,
-                needBuyOrder,
-                needSellOrder,
-                strategy: '允许的情况下最多1个买单和1个卖单存在'
-            });
-            return true;
-        } else {
-            this.logger.debug('当前订单状态符合智能策略要求', {
-                canCreateBuy,
-                canCreateSell,
-                activeBuyOrders,
-                activeSellOrders,
-                strategy: '允许的情况下最多1个买单和1个卖单存在'
-            });
-        }
-        // 检查是否存在过多订单（紧急清理）
-        if (this.activeOrders.size > 2) {
-            this.logger.warn('检测到过多活跃订单，触发紧急清理', {
-                activeOrdersCount: this.activeOrders.size,
-                activeOrders: Array.from(this.activeOrders.values()).map(o => ({
-                    id: o.id,
-                    side: o.side,
-                    amount: o.amount,
-                    price: o.price,
-                    status: o.status
-                })),
-                reason: '订单数量超过限制（最多2个）'
-            });
-            console.log(`⚠️ 检测到 ${this.activeOrders.size} 个活跃订单（超过限制），触发紧急清理`);
-            
-            // 立即清理多余订单（异步执行，不阻塞主流程）
-            this.cleanupExcessOrders().catch(error => {
-                this.logger.error('紧急清理订单失败', { error: error.message });
-            });
-            return true; // 强制更新订单
-        }
-
-        
-        // 检查订单刷新时间
-        if (timeSinceLastUpdate < this.orderRefreshTime) {
-            return false;
-        }
-        
-        // 检查指标是否有变化
-        if (!this.indicators.hasChanged()) {
-            return false;
-        }
-        
-        // 检查价格是否有显著变化（避免无意义的订单更新）
-        const { bid: lastBid, ask: lastAsk } = this.lastOrderPrices;
-        
-        // 如果是第一次创建订单，直接返回true
-        if (lastBid === 0 || lastAsk === 0) {
-            return true;
-        }
-        
-        // 计算价格变化百分比
-        const bidChangePercent = Math.abs((optimalBid - lastBid) / lastBid);
-        const askChangePercent = Math.abs((optimalAsk - lastAsk) / lastAsk);
-        
-        // 只有当买价或卖价变化超过阈值时才更新订单
-        const shouldUpdate = bidChangePercent >= this.priceChangeThreshold || 
-                           askChangePercent >= this.priceChangeThreshold;
-        
-        if (!shouldUpdate) {
-            this.logger.debug('价格变化未达到阈值，跳过订单更新', {
-                bidChange: (bidChangePercent * 100).toFixed(4) + '%',
-                askChange: (askChangePercent * 100).toFixed(4) + '%',
-                threshold: (this.priceChangeThreshold * 100).toFixed(4) + '%',
-                currentBid: optimalBid.toFixed(2),
-                currentAsk: optimalAsk.toFixed(2),
-                lastBid: lastBid.toFixed(2),
-                lastAsk: lastAsk.toFixed(2)
-            });
-        }
-        
-        return shouldUpdate;
-    }
-
-    /**
-     * 更新订单
-     */
-    async updateOrders() {
-        this.logger.info('开始执行 updateOrders 流程');
-        try {
-            // 重置强制更新标志
-            this.forceOrderUpdate = false;
-            
-            // 取消现有订单
-            this.logger.info('调用 cancelActiveOrders 取消现有订单');
-            await this.cancelActiveOrders();
-            
-            // 创建新订单
-            this.logger.info('调用 createOrders 创建新订单');
-            await this.createOrders();
-            
-            // 更新上次订单价格记录
-            this.lastOrderPrices = {
-                bid: this.strategyState.optimalBid,
-                ask: this.strategyState.optimalAsk,
-                timestamp: Date.now()
-            };
-            
-            this.lastUpdateTime = Date.now();
-            this.logger.info('订单更新流程完成', { 
-                lastUpdateTime: new Date(this.lastUpdateTime).toISOString(),
-                updatedPrices: {
-                    bid: this.lastOrderPrices.bid.toFixed(2),
-                    ask: this.lastOrderPrices.ask.toFixed(2)
-                }
-            });
-            console.log('✅ 订单更新完成');
-            
-        } catch (error) {
-            this.logger.error('更新订单失败', {
-                errorName: error.name,
-                errorMessage: error.message,
-                stack: error.stack
-            });
-            console.log(`❌ 订单更新失败: ${error.message}`);
-        }
-    }
-
-    /**
-     * 紧急清理过多订单
-     */
-    async cleanupExcessOrders() {
-        try {
-            this.logger.info('开始紧急清理过多订单', {
-                currentOrderCount: this.activeOrders.size,
-                maxAllowed: 2
-            });
-            
-            // 获取所有活跃订单并按时间排序（保留最新的2个）
-            const orders = Array.from(this.activeOrders.values());
-            orders.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-            
-            // 取消多余的订单（保留最新的2个）
-            const ordersToCancel = orders.slice(2);
-            
-            for (const order of ordersToCancel) {
-                try {
-                    await this.exchangeManager.cancelOrder(order.id, this.config.get('symbol'));
-                    this.activeOrders.delete(order.id);
-                    this.logger.info('紧急取消多余订单', {
-                        orderId: order.id,
-                        side: order.side,
-                        price: order.price
-                    });
-                    console.log(`🗑️ 紧急取消订单 #${order.id.slice(-6)} (${order.side})`);
-                } catch (error) {
-                    this.logger.error('紧急取消订单失败', {
-                        orderId: order.id,
-                        error: error.message
-                    });
-                }
-            }
-            
-            this.logger.info('紧急清理完成', {
-                cancelledCount: ordersToCancel.length,
-                remainingCount: this.activeOrders.size
-            });
-            
-        } catch (error) {
-            this.logger.error('紧急清理过程中发生错误', { error: error.message });
-        }
-    }
-
-    /**
-     * 取消活跃订单
-     */
-    async cancelActiveOrders() {
-        try {
-            const orderIds = Array.from(this.activeOrders.keys());
-            
-            for (const orderId of orderIds) {
-                try {
-                    await this.exchangeManager.cancelOrder(orderId, this.config.get('symbol'));
-                    this.logger.debug('Order cancelled', { orderId });
-                } catch (error) {
-                    this.logger.warn('Failed to cancel order', { orderId, error: error.message });
-                }
-            }
-            
-            this.activeOrders.clear();
-            
-        } catch (error) {
-            this.logger.error('Failed to cancel active orders', error);
-        }
-    }
-
-    /**
-     * 创建订单（增强网络状态检查）
-     */
-    async createOrders() {
-        try {
-            // 并发保护：如果正在创建订单，则跳过
-            if (this.isCreatingOrders) {
-                this.logger.warn('订单创建正在进行中，跳过本次创建请求');
-                console.log('⚠️ 订单创建正在进行中，跳过');
-                return;
-            }
-            
-            // 检查交易所连接状态
-            if (!this.exchangeManager.isConnected) {
-                this.logger.warn('交易所未连接，跳过订单创建');
-                console.log('⚠️ 交易所未连接，跳过订单创建');
-                return;
-            }
-            
-            // 检查网络连接状态
-            if (this.exchangeManager.networkManager && !this.exchangeManager.networkManager.isNetworkAvailable()) {
-                this.logger.warn('网络不可用，跳过订单创建', {
-                    networkStatus: this.exchangeManager.networkManager.getNetworkStatus()
-                });
-                console.log('⚠️ 网络不可用，跳过订单创建');
-                return;
-            }
-            
-            this.isCreatingOrders = true;
-            this.logger.info('开始创建订单，设置并发保护标志', {
-                networkAvailable: true,
-                exchangeConnected: true
-            });
-            
-            const { optimalBid, optimalAsk } = this.strategyState;
-            const { currentInventory, targetInventory, totalInventoryValue } = this.strategyState;
-            
-            // 获取市场信息以确保正确的精度
-            const marketInfo = this.exchangeManager.getMarketInfo();
-            if (!marketInfo || !marketInfo.precision) {
-                console.log('❌ 无法获取市场精度信息，跳过订单创建');
-                this.logger.error('无法获取市场精度信息，跳过订单创建');
-                return;
-            }
-            
-            // 计算订单数量
-            const baseAmount = this.config.get('orderAmount');
-            const minAmount = marketInfo.precision.amount;
-            const adjustedBaseAmount = Math.max(baseAmount, minAmount * 10);
-            
-            const buyAmount = this.calculator.calculateOrderAmount(
-                adjustedBaseAmount, currentInventory, targetInventory, totalInventoryValue, true
-            );
-            const sellAmount = this.calculator.calculateOrderAmount(
-                adjustedBaseAmount, currentInventory, targetInventory, totalInventoryValue, false
-            );
-            
-            // 紧凑输出订单信息
-            const inventorySkew = ((currentInventory - targetInventory) / totalInventoryValue * 100).toFixed(2);
-            console.log(`🔄下单 | 买: ${buyAmount.toFixed(4)}@${optimalBid.toFixed(2)} | 卖: ${sellAmount.toFixed(4)}@${optimalAsk.toFixed(2)} | 库存偏差: ${inventorySkew}%`);
-            // 并发创建买单和卖单
-            const orderTasks = [];
-            // 买单
-            orderTasks.push((async () => {
-                if (buyAmount > 0 && optimalBid > 0) {
-                    const buyValidation = this.riskManager.validateOrder('buy', buyAmount, optimalBid, this.exchangeManager.getBalances());
-                    if (buyValidation.valid) {
-                        const buyClientOrderId = Helpers.generateUniqueId();
-                        const buyOrder = await this.createOrder('buy', buyAmount, optimalBid, buyClientOrderId);
-                        if (buyOrder) {
-                            this.activeOrders.set(buyOrder.id, buyOrder);
-                            console.log(`✅买单 #${buyOrder.id.slice(-6)} | ${buyAmount.toFixed(4)}@${optimalBid.toFixed(2)}`);
-                            this.logger.info('买单创建成功', {
-                                orderId: buyOrder.id,
-                                clientOrderId: buyClientOrderId,
-                                amount: buyOrder.amount,
-                                price: buyOrder.price,
-                                status: buyOrder.status
-                            });
-                        } else {
-                            console.log(`❌买单创建失败`);
-                        }
-                    } else {
-                        console.log(`❌买单风险拒绝: ${buyValidation.reason}`);
-                        this.logger.warn('买单被风险管理器拒绝', buyValidation);
-                    }
-                } else {
-                    const reason = buyAmount <= 0 ? '数量为零' : '价格无效';
-                    console.log(`⏭️跳过买单: ${reason}`);
-                    this.logger.debug('跳过买单创建', {
-                        buyAmount: buyAmount,
-                        optimalBid: optimalBid,
-                        reason: reason
-                    });
-                }
-            })());
-            // 卖单
-            orderTasks.push((async () => {
-                if (sellAmount > 0 && optimalAsk > 0) {
-                    const sellValidation = this.riskManager.validateOrder('sell', sellAmount, optimalAsk, this.exchangeManager.getBalances());
-                    if (sellValidation.valid) {
-                        const sellClientOrderId = Helpers.generateUniqueId();
-                        const sellOrder = await this.createOrder('sell', sellAmount, optimalAsk, sellClientOrderId);
-                        if (sellOrder) {
-                            this.activeOrders.set(sellOrder.id, sellOrder);
-                            console.log(`✅卖单 #${sellOrder.id.slice(-6)} | ${sellAmount.toFixed(4)}@${optimalAsk.toFixed(2)}`);
-                            this.logger.info('卖单创建成功', {
-                                orderId: sellOrder.id,
-                                clientOrderId: sellClientOrderId,
-                                amount: sellOrder.amount,
-                                price: sellOrder.price,
-                                status: sellOrder.status
-                            });
-                        } else {
-                            console.log(`❌卖单创建失败`);
-                        }
-                    } else {
-                        console.log(`❌卖单风险拒绝: ${sellValidation.reason}`);
-                        this.logger.warn('卖单被风险管理器拒绝', sellValidation);
-                    }
-                } else {
-                    const reason = sellAmount <= 0 ? '数量为零' : '价格无效';
-                    console.log(`⏭️跳过卖单: ${reason}`);
-                    this.logger.debug('跳过卖单创建', {
-                        sellAmount: sellAmount,
-                        optimalAsk: optimalAsk,
-                        reason: reason
-                    });
-                }
-            })());
-            // 并发执行买卖单下单
-            await Promise.all(orderTasks);
-            
-            // 紧凑输出订单创建结果
-            console.log(`📋订单完成 | 活跃: ${this.activeOrders.size}个`);
-            
-            this.logger.info('订单创建完成', {
-                buyAmount,
-                sellAmount,
-                optimalBid,
-                optimalAsk,
-                activeOrdersCount: this.activeOrders.size
-            });
-        } catch (error) {
-            console.log('❌ 创建订单失败:', error.message);
-            this.logger.error('创建订单失败', error);
-        } finally {
-            this.isCreatingOrders = false;
-            this.logger.debug("订单创建并发保护标志已重置");
-        }
-    }
-
-    /**
-     * 创建单个订单（下单后主动校验订单状态，带超时和重试）
-     */
-    async createOrder(side, amount, price, clientOrderId, maxRetries = 3, timeout = 5000) {
-        let attempt = 0;
-        this.logger.info('尝试创建单个订单', { side, amount, price, clientOrderId, maxRetries, timeout });
-        while (attempt < maxRetries) {
-            try {
-                this.logger.debug(`正在创建${side === 'buy' ? '买单' : '卖单'}... (第${attempt + 1}次尝试, ClientOrderID: ${clientOrderId})`);
-                this.logger.debug(`参数: ${side} ${amount} BTC @ ${price} USDT`);
-
-                // 尝试下单
-                const orderPromise = this.exchangeManager.createOrder(side, amount, price, 'limit', { clientOrderId });
-                const order = await Promise.race([
-                    orderPromise,
-                    this.sleep(timeout).then(() => { throw new Error('下单请求超时'); })
-                ]);
-
-                if (order && order.id) {
-                    // 订单已成功提交并返回ID，进行二次验证
-                    this.logger.info('Order submitted, verifying...', {
-                        id: order.id,
-                        clientOrderId: clientOrderId,
-                        side,
-                        amount,
-                        price,
-                        status: order.status
-                    });
-                    
-                    // 等待一小段时间后验证订单是否真正存在
-                    await this.sleep(500);
-                    try {
-                        const verifyOrder = await this.exchangeManager.getOrderById(order.id);
-                        if (verifyOrder && verifyOrder.id === order.id) {
-                            this.logger.info('Order verification successful', {
-                                id: order.id,
-                                verifiedStatus: verifyOrder.status
-                            });
-                            return verifyOrder; // 返回验证后的订单信息
-                        } else {
-                            this.logger.warn('Order verification failed - order not found', {
-                                id: order.id,
-                                clientOrderId: clientOrderId
-                            });
-                            throw new Error('订单验证失败 - 订单不存在');
-                        }
-                    } catch (verifyError) {
-                        this.logger.warn('Order verification error, using original order', {
-                            id: order.id,
-                            error: verifyError.message
-                        });
-                        // 验证失败时仍返回原订单，但记录警告
-                        return order;
-                    }
-                } else {
-                    // 订单提交失败，但没有抛出异常（例如返回null或空对象）
-                    throw new Error('无效订单返回');
-                }
-            } catch (error) {
-                attempt++;
-                this.logger.warn('下单请求失败', {
-                    side,
-                    amount,
-                    price,
-                    clientOrderId,
-                    attempt,
-                    error: error.message
-                });
-
-                // 如果是超时错误，尝试通过 clientOrderId 查询订单状态
-                if (error.message === '下单请求超时' || error.message.includes('timeout')) {
-                    try {
-                        const existingOrder = await this.exchangeManager.getOrderByClientOrderId(clientOrderId, this.config.get('symbol'));
-                        if (existingOrder && existingOrder.id) {
-                            this.logger.info('Found existing order after timeout', {
-                                id: existingOrder.id,
-                                clientOrderId: clientOrderId,
-                                status: existingOrder.status
-                            });
-                            return existingOrder; // 找到现有订单，不再重试
-                        }
-                    } catch (queryError) {
-                        this.logger.error('Failed to query existing order by clientOrderId', {
-                            clientOrderId,
-                            error: queryError.message
-                        });
-                    }
-                }
-
-                if (attempt < maxRetries) {
-                    await this.sleep(1000); // 重试间隔1秒
-                } else {
-                    this.logger.error('下单最终失败', {
-                        side,
-                        amount,
-                        price,
-                        clientOrderId,
-                        attempt,
-                        error: error.message
-                    });
-                }
-            }
-        }
-        return null; // 所有重试都失败
-    }
-
-    /**
-     * 取消所有订单
-     */
-    async cancelAllOrders() {
-        try {
-            await this.cancelActiveOrders();
-            this.logger.info('All orders cancelled');
-        } catch (error) {
-            this.logger.error('Failed to cancel all orders', error);
-        }
-    }
-
-    /**
-     * 处理订单更新
-     */
-    handleOrderUpdate(order) {
-        try {
-            const orderId = order.id;
-            this.logger.info('收到订单更新', {
-                id: order.id,
-                status: order.status,
-                side: order.side,
-                amount: order.amount,
-                filled: order.filled,
-                remaining: order.remaining,
-                clientOrderId: order.clientOrderId
-            });
-
-            // 更新活跃订单
-            if (this.activeOrders.has(orderId)) {
-                const existingOrder = this.activeOrders.get(orderId);
-                // 仅当新状态更"终结"时才更新，避免旧状态覆盖新状态
-                if (this.isNewOrderStatusMoreFinal(existingOrder.status, order.status)) {
-                    this.activeOrders.set(orderId, order);
-                    this.logger.debug('活跃订单状态已更新', { id: order.id, oldStatus: existingOrder.status, newStatus: order.status });
-                } else {
-                    this.logger.debug('活跃订单状态未更新 (新状态不更终结)', { id: order.id, oldStatus: existingOrder.status, newStatus: order.status });
-                }
-                
-                // 检查订单状态
-                if (order.status === 'filled') {
-                    this.logger.info('订单已成交，调用 handleOrderFilled', { id: order.id });
-                    this.handleOrderFilled(order);
-                } else if (order.status === 'canceled' || order.status === 'rejected' || order.status === 'expired') {
-                    this.logger.info('订单已取消/拒绝/过期，从活跃订单中移除', { id: order.id, status: order.status });
-                    this.activeOrders.delete(orderId);
-                } else if (order.status === 'open' && !this.activeOrders.has(orderId)) {
-                    // 如果是新收到的open订单，且本地没有，则添加
-                    this.activeOrders.set(orderId, order);
-                    this.logger.info('新开放订单已添加到活跃订单列表', { id: order.id });
-                }
-            } else if (order.status === 'open' || order.status === 'partially_filled') {
-                // 如果本地没有此订单，且状态是open或partially_filled，则添加
-                this.activeOrders.set(orderId, order);
-                this.logger.info('新订单已添加到活跃订单列表', { id: order.id, status: order.status });
-            }
-            
-            // 记录订单历史
-            this.orderHistory.push({
-                ...order,
-                timestamp: Date.now()
-            });
-            this.logger.debug('订单已添加到历史记录', { id: order.id, historySize: this.orderHistory.length });
-            
-        } catch (error) {
-            this.logger.error('处理订单更新时出错', {
-                orderId: order ? order.id : 'N/A',
-                errorName: error.name,
-                errorMessage: error.message,
-                stack: error.stack
-            });
-        }
-    }
-
-    /**
-     * 辅助函数：判断新订单状态是否比旧状态更“终结”
-     * 用于避免旧的或不完整的状态更新覆盖新的、更准确的状态
-     */
-    isNewOrderStatusMoreFinal(oldStatus, newStatus) {
-        const statusPrecedence = {
-            'open': 1,
-            'partially_filled': 2,
-            'canceled': 3,
-            'rejected': 3,
-            'expired': 3,
-            'filled': 4
-        };
-        return (statusPrecedence[newStatus] || 0) >= (statusPrecedence[oldStatus] || 0);
-    }
-
-    /**
-     * 处理订单成交
-     */
-    handleOrderFilled(order) {
-        try {
-            this.logger.info('订单已成交', {
-                id: order.id,
-                side: order.side,
-                amount: order.amount,
-                price: order.price,
-                cost: order.cost,
-                filled: order.filled,
-                remaining: order.remaining,
-                clientOrderId: order.clientOrderId
-            });
-            
-            // 从活跃订单中移除
-            if (this.activeOrders.has(order.id)) {
-                this.activeOrders.delete(order.id);
-                this.logger.debug('已成交订单从活跃订单列表中移除', { id: order.id });
-            } else {
-                this.logger.warn('尝试移除已成交订单，但该订单不在活跃订单列表中', { id: order.id });
-            }
-            
-            // 更新已实现盈亏（这里简化处理，实际应该根据成本价计算）
-            const realizedPnL = this.calculateRealizedPnL(order);
-            this.riskManager.updateRealizedPnL(realizedPnL);
-            this.logger.info('已实现盈亏已更新', { orderId: order.id, realizedPnL: realizedPnL });
-            
-            // 标记需要强制更新订单（订单成交后立即更新）
-            this.forceOrderUpdate = true;
-            this.logger.info('订单成交，已设置强制更新标志，等待下次策略循环时更新订单');
-            
-        } catch (error) {
-            this.logger.error('处理订单成交时出错', {
-                orderId: order ? order.id : 'N/A',
-                errorName: error.name,
-                errorMessage: error.message,
-                stack: error.stack
-            });
-        }
-    }
-    
-    /**
-     * 计算已实现盈亏
-     */
-    calculateRealizedPnL(order) {
-        // 这里简化计算，实际应该根据持仓成本价计算
-        // 对于做市策略，通常通过买卖价差获得利润
-        const spread = this.currentMarketData.bestAsk - this.currentMarketData.bestBid;
-        const estimatedPnL = order.amount * spread * 0.5; // 假设获得一半价差
-        
-        return estimatedPnL;
-    }
-
-    /**
-     * 记录策略状态
-     */
-    logStrategyStatus() {
-        try {
-            const status = {
-                timestamp: Date.now(),
-                isRunning: this.isRunning,
-                marketData: {
-                    midPrice: this.currentMarketData.midPrice,
-                    bestBid: this.currentMarketData.bestBid,
-                    bestAsk: this.currentMarketData.bestAsk
-                },
-                balances: {
-                    baseAmount: this.currentBalances.baseAmount,
-                    quoteAmount: this.currentBalances.quoteAmount
-                },
-                strategyState: this.strategyState,
-                indicators: this.indicators.getCurrentValues(),
-                activeOrders: this.activeOrders.size
-            };
-            
-            this.logger.info('Strategy status', status);
-            
-        } catch (error) {
-            this.logger.error('Failed to log strategy status', error);
-        }
+    async forceCleanup() {
+        return await this.lifecycleManager.forceCleanup();
     }
 
     /**
      * 获取策略状态
      */
     getStatus() {
+        const lifecycleStatus = this.lifecycleManager.getStatus();
+        const marketSummary = this.dataManager.getMarketDataSummary();
+        const balanceSummary = this.dataManager.getBalanceSummary();
+        const activeOrders = this.orderManager.getActiveOrders();
+        const orderHistory = this.orderManager.getOrderHistory();
+        const performanceStats = this.strategyCore.getPerformanceStats();
+        
         return {
-            isRunning: this.isRunning,
-            isInitialized: this.isInitialized,
-            marketData: this.currentMarketData,
-            balances: this.currentBalances,
-            strategyState: this.strategyState,
-            indicators: this.indicators.getStatus(),
-            riskStatus: this.riskManager.getRiskStatus(),
-            activeOrders: Array.from(this.activeOrders.values()),
-            orderHistory: this.orderHistory.slice(-10) // 最近10个订单
+            // 生命周期状态
+            lifecycle: lifecycleStatus,
+            
+            // 策略状态
+            strategy: {
+                isInitialized: this.isInitialized,
+                strategyState: this.strategyState,
+                performance: performanceStats
+            },
+            
+            // 市场数据
+            market: marketSummary,
+            
+            // 账户数据
+            account: balanceSummary,
+            
+            // 订单数据
+            orders: {
+                active: activeOrders,
+                history: orderHistory,
+                activeCount: activeOrders.length
+            },
+            
+            // 组件状态
+            components: {
+                exchange: {
+                    connected: this.exchangeManager.isConnected,
+                    status: this.exchangeManager.getStatus()
+                },
+                dataManager: this.dataManager.getUpdateStatus()
+            },
+            
+            // 时间戳
+            timestamp: Date.now()
         };
     }
 
     /**
-     * 清理多余订单
+     * 获取策略统计信息
      */
-    async cleanupExcessOrders() {
-        try {
-            this.logger.info('开始清理多余订单', {
-                totalOrders: this.activeOrders.size
-            });
+    getStats() {
+        return {
+            performance: this.strategyCore.getPerformanceStats(),
+            lifecycle: this.lifecycleManager.getStatus(),
+            orders: {
+                activeCount: this.orderManager.getActiveOrdersCount(),
+                historyCount: this.orderManager.getOrderHistory().length
+            },
+            market: this.dataManager.getMarketDataSummary(),
+            account: this.dataManager.getBalanceSummary()
+        };
+    }
 
-            // 按订单类型分组
-            const buyOrders = [];
-            const sellOrders = [];
-            
-            for (const order of this.activeOrders.values()) {
-                if (order.side === 'buy') {
-                    buyOrders.push(order);
-                } else if (order.side === 'sell') {
-                    sellOrders.push(order);
-                }
-            }
-
-            // 清理多余的买单（保留最新的1个）
-            if (buyOrders.length > 1) {
-                buyOrders.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
-                const excessBuyOrders = buyOrders.slice(1);
-                
-                for (const order of excessBuyOrders) {
-                    try {
-                        await this.exchangeManager.cancelOrder(order.id);
-                        this.activeOrders.delete(order.id);
-                        this.logger.info('多余买单已取消', { orderId: order.id });
-                        console.log(`🗑️ 取消多余买单 #${order.id.slice(-6)}`);
-                    } catch (error) {
-                        this.logger.error('取消多余买单失败', { orderId: order.id, error: error.message });
-                    }
-                }
-            }
-
-            // 清理多余的卖单（保留最新的1个）
-            if (sellOrders.length > 1) {
-                sellOrders.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
-                const excessSellOrders = sellOrders.slice(1);
-                
-                for (const order of excessSellOrders) {
-                    try {
-                        await this.exchangeManager.cancelOrder(order.id);
-                        this.activeOrders.delete(order.id);
-                        this.logger.info('多余卖单已取消', { orderId: order.id });
-                        console.log(`🗑️ 取消多余卖单 #${order.id.slice(-6)}`);
-                    } catch (error) {
-                        this.logger.error('取消多余卖单失败', { orderId: order.id, error: error.message });
-                    }
-                }
-            }
-
-            this.logger.info('多余订单清理完成', {
-                remainingOrders: this.activeOrders.size
-            });
-            console.log(`✅ 多余订单清理完成，剩余 ${this.activeOrders.size} 个订单`);
-
-        } catch (error) {
-            this.logger.error('清理多余订单失败', error);
-            console.log(`❌ 清理多余订单失败: ${error.message}`);
+    /**
+     * 更新策略参数
+     */
+    updateParameters(params) {
+        const validation = this.strategyCore.validateParameters(params);
+        if (!validation.valid) {
+            throw new Error(`参数验证失败: ${validation.errors.join(', ')}`);
         }
+        
+        this.strategyCore.updateParameters(params);
+        this.logger.info('策略参数已更新', params);
+    }
+
+    /**
+     * 获取当前策略参数
+     */
+    getParameters() {
+        return this.strategyCore.getParameters();
+    }
+
+    /**
+     * 强制同步订单状态
+     */
+    async syncOrders() {
+        return await this.orderManager.syncActiveOrdersFromExchange();
+    }
+
+    /**
+     * 强制更新所有数据
+     */
+    async forceDataUpdate() {
+        return await this.dataManager.forceUpdateAll();
+    }
+
+    /**
+     * 取消所有订单
+     */
+    async cancelAllOrders() {
+        return await this.orderManager.cancelAllOrders();
+    }
+
+    /**
+     * 重置策略统计
+     */
+    resetStats() {
+        this.strategyCore.resetStats();
+        this.lifecycleManager.resetState();
+        this.dataManager.reset();
+        this.logger.info('策略统计已重置');
+    }
+
+    /**
+     * 获取日志记录器（用于外部访问）
+     */
+    getLogger() {
+        return this.logger;
+    }
+
+    /**
+     * 获取配置（用于外部访问）
+     */
+    getConfig() {
+        return this.config;
+    }
+
+    /**
+     * 检查策略是否健康
+     */
+    isHealthy() {
+        return {
+            overall: this.isInitialized && this.exchangeManager.isConnected,
+            details: {
+                initialized: this.isInitialized,
+                exchangeConnected: this.exchangeManager.isConnected,
+                hasMarketData: !!this.currentMarketData.midPrice,
+                hasBalanceData: !!this.currentBalances.timestamp,
+                hasValidVolatility: this.strategyState.volatility > 0
+            }
+        };
     }
 
     /**
@@ -1572,106 +351,6 @@ class AvellanedaStrategy extends EventEmitter {
      */
     sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
-    }
-    
-    /**
-     * 启动订单监控
-     */
-    startOrderMonitoring() {
-        if (this.orderMonitoringTimer) {
-            this.logger.warn('订单监控已在运行中');
-            return;
-        }
-        
-        this.logger.info('启动订单状态监控', {
-            interval: this.orderMonitoringInterval
-        });
-        
-        this.orderMonitoringTimer = setInterval(async () => {
-            try {
-                await this.monitorOrderStatus();
-            } catch (error) {
-                this.logger.error('订单监控过程中出错', {
-                    errorName: error.name,
-                    errorMessage: error.message
-                });
-            }
-        }, this.orderMonitoringInterval);
-    }
-    
-    /**
-     * 停止订单监控
-     */
-    stopOrderMonitoring() {
-        if (this.orderMonitoringTimer) {
-            clearInterval(this.orderMonitoringTimer);
-            this.orderMonitoringTimer = null;
-            this.logger.info('订单监控已停止');
-        }
-    }
-    
-    /**
-     * 监控订单状态
-     */
-    async monitorOrderStatus() {
-        if (!this.isRunning || this.activeOrders.size === 0) {
-            return;
-        }
-        
-        this.logger.debug('开始监控订单状态', {
-            activeOrdersCount: this.activeOrders.size
-        });
-        
-        // 创建当前活跃订单的副本，避免在迭代过程中修改
-        const ordersToCheck = new Map(this.activeOrders);
-        
-        for (const [orderId, localOrder] of ordersToCheck) {
-            try {
-                // 查询远程订单状态
-                const remoteOrder = await this.exchangeManager.getOrder(orderId);
-                
-                // 检查状态是否发生变化
-                if (remoteOrder.status !== localOrder.status) {
-                    this.logger.info('检测到订单状态变化', {
-                        orderId: orderId,
-                        localStatus: localOrder.status,
-                        remoteStatus: remoteOrder.status,
-                        side: remoteOrder.side,
-                        amount: remoteOrder.amount,
-                        price: remoteOrder.price
-                    });
-                    
-                    // 触发订单更新处理
-                    this.handleOrderUpdate(remoteOrder);
-                }
-                
-            } catch (error) {
-                // 如果订单查询失败，可能是订单已被取消或不存在
-                if (error.message.includes('Order not found') || 
-                    error.message.includes('order not found') ||
-                    error.message.includes('Invalid order')) {
-                    this.logger.warn('订单不存在，从活跃订单列表中移除', {
-                        orderId: orderId,
-                        error: error.message
-                    });
-                    
-                    // 创建一个取消状态的订单对象
-                    const canceledOrder = {
-                        ...localOrder,
-                        status: 'canceled',
-                        timestamp: Date.now()
-                    };
-                    
-                    this.handleOrderUpdate(canceledOrder);
-                } else {
-                    this.logger.error('查询订单状态失败', {
-                        orderId: orderId,
-                        errorName: error.name,
-                        errorMessage: error.message
-                    });
-                }
-            }
-        }
     }
 }
 
