@@ -1,6 +1,6 @@
 const StrategyConfig = require('./config/strategy');
 const Logger = require('./utils/logger');
-const AvellanedaStrategy = require('./core/strategy');
+const AvellanedaStrategyBase = require('./core/strategy/base');
 const ccxt = require('ccxt');
 
 class AvellanedaMarketMaking {
@@ -205,7 +205,7 @@ class AvellanedaMarketMaking {
             console.log('   initializeStrategy: 开始创建策略实例...');
             
             // 创建策略实例，传递配置管理器实例
-            this.strategy = new AvellanedaStrategy(this.config);
+            this.strategy = new AvellanedaStrategyBase(this.config);
             
             console.log('   initializeStrategy: 策略实例创建完成，开始初始化策略组件...');
             
