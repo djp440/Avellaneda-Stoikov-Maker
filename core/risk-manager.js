@@ -425,6 +425,12 @@ class RiskManager extends EventEmitter {
      */
     async triggerEmergencyStop(event) {
         try {
+            // 使用原子性检查和设置，避免竞争条件
+            if (this.riskState.isEmergencyStop) {
+                this.logger.debug('紧急停止已激活，跳过重复触发');
+                return;
+            }
+            
             this.riskState.isEmergencyStop = true;
             console.error('风险管理器: 紧急停止已激活！');
             

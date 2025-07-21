@@ -751,6 +751,9 @@ class ExchangeManager extends EventEmitter {
     async handleNetworkConnectionRestored() {
         this.logger.info('Network connection restored, attempting to reconnect exchange');
         
+        // 重置重试计数器，确保网络恢复后有完整的重连机会
+        this.connectionRetryCount = 0;
+        
         // 等待网络稳定
         setTimeout(async () => {
             try {
@@ -884,4 +887,4 @@ class ExchangeManager extends EventEmitter {
     }
 }
 
-module.exports = ExchangeManager; 
+module.exports = ExchangeManager;

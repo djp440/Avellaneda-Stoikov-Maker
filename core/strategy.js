@@ -370,10 +370,7 @@ class AvellanedaStrategy extends EventEmitter {
             console.log('\n🛑 开始停止策略...\n');
             this.logger.info('停止策略');
 
-            // 停止健康检查
-            console.log('💓 停止健康检查...');
-            this.stopHealthCheck();
-            console.log('✅ 健康检查已停止');
+            // 注意：健康检查由主程序管理，策略类不直接控制
 
             // 停止策略
             if (this.strategy) {
@@ -479,6 +476,13 @@ class AvellanedaStrategy extends EventEmitter {
                         this.logger.error('策略因紧急停止而终止');
                         console.error('AvellanedaStrategy: mainLoop() - 策略因紧急停止而终止');
                         this.isRunning = false; // 立即停止主循环
+                        
+                        // 发出策略停止事件，通知其他组件
+                        this.emit('strategyStopped', {
+                            reason: 'Emergency stop triggered',
+                            timestamp: new Date().toISOString(),
+                            riskStatus: riskStatus.state
+                        });
                         return;
                     }
                     // 检查指标是否准备就绪
@@ -527,6 +531,16 @@ class AvellanedaStrategy extends EventEmitter {
             // 获取最新价格
             const ticker = await this.exchangeManager.fetchTicker(this.config.get('symbol'));
             
+            // 验证数据有效性
+            if (!orderBook || !orderBook.bids || !orderBook.asks || 
+                orderBook.bids.length === 0 || orderBook.asks.length === 0) {
+                throw new Error('Invalid order book data received');
+            }
+            
+            if (!ticker || !ticker.last) {
+                throw new Error('Invalid ticker data received');
+            }
+            
             // 计算中间价
             const midPrice = Helpers.calculateMidPrice(orderBook.bids[0][0], orderBook.asks[0][0]);
             
@@ -548,6 +562,14 @@ class AvellanedaStrategy extends EventEmitter {
             
         } catch (error) {
             this.logger.error('更新市场数据失败', error);
+            
+            // 检查当前市场数据是否过期（超过30秒）
+            if (this.currentMarketData && 
+                Date.now() - this.currentMarketData.timestamp > 30000) {
+                this.logger.warn('市场数据已过期，暂停策略执行');
+                // 可以考虑设置一个标志来暂停策略执行
+                this.currentMarketData = null;
+            }
         }
     }
 
@@ -602,6 +624,18 @@ class AvellanedaStrategy extends EventEmitter {
      */
     async executeStrategy() {
         try {
+            // 检查市场数据有效性
+            if (!this.currentMarketData) {
+                this.logger.warn('市场数据不可用，跳过策略执行');
+                return;
+            }
+            
+            // 检查市场数据是否过期（超过30秒）
+            if (Date.now() - this.currentMarketData.timestamp > 30000) {
+                this.logger.warn('市场数据已过期，跳过策略执行');
+                return;
+            }
+            
             // 获取当前指标值
             const indicators = this.indicators.getCurrentValues();
             

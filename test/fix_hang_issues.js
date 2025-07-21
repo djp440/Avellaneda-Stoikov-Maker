@@ -486,10 +486,7 @@ async function main() {
             console.log('\\n🛑 开始停止策略...\\n');
             this.logger.info('停止策略');
 
-            // 停止健康检查
-            console.log('💓 停止健康检查...');
-            this.stopHealthCheck();
-            console.log('✅ 健康检查已停止');
+            // 注意：健康检查由主程序管理，策略类不直接控制
 
             // 停止策略
             if (this.strategy) {
@@ -698,4 +695,4 @@ if (require.main === module) {
     main();
 }
 
-module.exports = HangIssueFixer; 
+module.exports = HangIssueFixer;
