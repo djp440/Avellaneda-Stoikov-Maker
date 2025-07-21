@@ -28,6 +28,7 @@ class AvellanedaStrategy extends EventEmitter {
         this.orderRefreshTime = (config.get('orderTimeout') || 30000) / 1000; // 订单刷新时间(秒)
         this.filledOrderDelay = config.get('filledOrderDelay') || 1; // 订单成交后延迟(秒)
         this.forceOrderUpdate = false; // 强制更新订单标志
+        this.isCreatingOrders = false; // 订单创建并发保护标志
         
         // 订单管理
         this.activeOrders = new Map(); // 活跃订单
@@ -659,6 +660,14 @@ class AvellanedaStrategy extends EventEmitter {
      */
     async executeStrategy() {
         try {
+            // 定期同步订单状态（每10次循环同步一次）
+            if (!this.syncCounter) this.syncCounter = 0;
+            this.syncCounter++;
+            if (this.syncCounter >= 10) {
+                this.syncCounter = 0;
+                await this.syncActiveOrdersFromExchange();
+            }
+
             // 检查市场数据有效性
             if (!this.currentMarketData) {
                 this.logger.warn('市场数据不可用，跳过策略执行');
@@ -842,6 +851,24 @@ class AvellanedaStrategy extends EventEmitter {
                 strategy: '允许的情况下最多1个买单和1个卖单存在'
             });
         }
+        // 检查是否存在过多订单（紧急清理）
+        if (this.activeOrders.size > 2) {
+            this.logger.warn('检测到过多活跃订单，触发紧急清理', {
+                activeOrdersCount: this.activeOrders.size,
+                activeOrders: Array.from(this.activeOrders.values()).map(o => ({
+                    id: o.id,
+                    side: o.side,
+                    amount: o.amount,
+                    price: o.price
+                }))
+            });
+            console.log(`⚠️ 检测到 ${this.activeOrders.size} 个活跃订单（超过限制），触发紧急清理`);
+            
+            // 立即清理多余订单
+            this.cleanupExcessOrders();
+            return true; // 强制更新订单
+        }
+
         
         // 检查订单刷新时间
         if (timeSinceLastUpdate < this.orderRefreshTime) {
@@ -956,6 +983,16 @@ class AvellanedaStrategy extends EventEmitter {
      */
     async createOrders() {
         try {
+            // 并发保护：如果正在创建订单，则跳过
+            if (this.isCreatingOrders) {
+                this.logger.warn('订单创建正在进行中，跳过本次创建请求');
+                console.log('⚠️ 订单创建正在进行中，跳过');
+                return;
+            }
+            
+            this.isCreatingOrders = true;
+            this.logger.info('开始创建订单，设置并发保护标志');
+            
             const { optimalBid, optimalAsk } = this.strategyState;
             const { currentInventory, targetInventory, totalInventoryValue } = this.strategyState;
             
@@ -1068,6 +1105,9 @@ class AvellanedaStrategy extends EventEmitter {
         } catch (error) {
             console.log('❌ 创建订单失败:', error.message);
             this.logger.error('创建订单失败', error);
+        } finally {
+            this.isCreatingOrders = false;
+            this.logger.debug("订单创建并发保护标志已重置");
         }
     }
 
@@ -1183,7 +1223,7 @@ class AvellanedaStrategy extends EventEmitter {
             // 更新活跃订单
             if (this.activeOrders.has(orderId)) {
                 const existingOrder = this.activeOrders.get(orderId);
-                // 仅当新状态更“终结”时才更新，避免旧状态覆盖新状态
+                // 仅当新状态更"终结"时才更新，避免旧状态覆盖新状态
                 if (this.isNewOrderStatusMoreFinal(existingOrder.status, order.status)) {
                     this.activeOrders.set(orderId, order);
                     this.logger.debug('活跃订单状态已更新', { id: order.id, oldStatus: existingOrder.status, newStatus: order.status });
@@ -1341,6 +1381,72 @@ class AvellanedaStrategy extends EventEmitter {
             activeOrders: Array.from(this.activeOrders.values()),
             orderHistory: this.orderHistory.slice(-10) // 最近10个订单
         };
+    }
+
+    /**
+     * 清理多余订单
+     */
+    async cleanupExcessOrders() {
+        try {
+            this.logger.info('开始清理多余订单', {
+                totalOrders: this.activeOrders.size
+            });
+
+            // 按订单类型分组
+            const buyOrders = [];
+            const sellOrders = [];
+            
+            for (const order of this.activeOrders.values()) {
+                if (order.side === 'buy') {
+                    buyOrders.push(order);
+                } else if (order.side === 'sell') {
+                    sellOrders.push(order);
+                }
+            }
+
+            // 清理多余的买单（保留最新的1个）
+            if (buyOrders.length > 1) {
+                buyOrders.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+                const excessBuyOrders = buyOrders.slice(1);
+                
+                for (const order of excessBuyOrders) {
+                    try {
+                        await this.exchangeManager.cancelOrder(order.id);
+                        this.activeOrders.delete(order.id);
+                        this.logger.info('多余买单已取消', { orderId: order.id });
+                        console.log(`🗑️ 取消多余买单 #${order.id.slice(-6)}`);
+                    } catch (error) {
+                        this.logger.error('取消多余买单失败', { orderId: order.id, error: error.message });
+                    }
+                }
+            }
+
+            // 清理多余的卖单（保留最新的1个）
+            if (sellOrders.length > 1) {
+                sellOrders.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+                const excessSellOrders = sellOrders.slice(1);
+                
+                for (const order of excessSellOrders) {
+                    try {
+                        await this.exchangeManager.cancelOrder(order.id);
+                        this.activeOrders.delete(order.id);
+                        this.logger.info('多余卖单已取消', { orderId: order.id });
+                        console.log(`🗑️ 取消多余卖单 #${order.id.slice(-6)}`);
+                    } catch (error) {
+                        this.logger.error('取消多余卖单失败', { orderId: order.id, error: error.message });
+                    }
+                }
+            }
+
+            this.logger.info('多余订单清理完成', {
+                remainingOrders: this.activeOrders.size
+            });
+            console.log(`✅ 多余订单清理完成，剩余 ${this.activeOrders.size} 个订单`);
+
+        } catch (error) {
+            this.logger.error('清理多余订单失败', error);
+            console.log(`❌ 清理多余订单失败: ${error.message}`);
+        }
     }
 
     /**
