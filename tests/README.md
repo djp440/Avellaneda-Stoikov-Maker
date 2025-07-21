@@ -16,6 +16,17 @@
 
 **运行方式**: `node tests/test_order_filled_update.js`
 
+#### `test_compact_order_output.js`
+**功能**: 测试紧凑订单输出格式
+**测试内容**:
+- 订单创建时的紧凑输出格式
+- 成功/失败状态的简洁显示
+- 跳过订单的原因说明
+- 订单完成状态的紧凑显示
+- 新旧输出格式的对比展示
+
+**运行方式**: `node tests/test_compact_order_output.js`
+
 #### `test_market_data_validation.js`
 **功能**: 测试市场数据验证逻辑
 **测试内容**:

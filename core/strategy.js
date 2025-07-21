@@ -888,8 +888,7 @@ class AvellanedaStrategy extends EventEmitter {
         try {
             const { optimalBid, optimalAsk } = this.strategyState;
             const { currentInventory, targetInventory, totalInventoryValue } = this.strategyState;
-            console.log('\n📝 开始构建订单参数...');
-            console.log('─'.repeat(50));
+            
             // 获取市场信息以确保正确的精度
             const marketInfo = this.exchangeManager.getMarketInfo();
             if (!marketInfo || !marketInfo.precision) {
@@ -897,43 +896,34 @@ class AvellanedaStrategy extends EventEmitter {
                 this.logger.error('无法获取市场精度信息，跳过订单创建');
                 return;
             }
+            
             // 计算订单数量
             const baseAmount = this.config.get('orderAmount');
-            // 确保基础数量符合最小精度要求
-            const minAmount = marketInfo.precision.amount; // CCXT返回的是最小数量，不是精度位数
-            const adjustedBaseAmount = Math.max(baseAmount, minAmount * 10); // 至少10倍最小数量
-            console.log('📊 订单数量计算:');
-            console.log(`   原始数量: ${baseAmount}`);
-            console.log(`   调整数量: ${adjustedBaseAmount}`);
-            console.log(`   最小数量: ${minAmount}`);
-            console.log(`   数量精度: ${minAmount} (最小数量)`);
+            const minAmount = marketInfo.precision.amount;
+            const adjustedBaseAmount = Math.max(baseAmount, minAmount * 10);
+            
             const buyAmount = this.calculator.calculateOrderAmount(
                 adjustedBaseAmount, currentInventory, targetInventory, totalInventoryValue, true
             );
             const sellAmount = this.calculator.calculateOrderAmount(
                 adjustedBaseAmount, currentInventory, targetInventory, totalInventoryValue, false
             );
-            console.log('\n🎯 订单数量计算结果:');
-            console.log(`   买单数量: ${buyAmount.toFixed(8)} ${this.config.get('baseCurrency')}`);
-            console.log(`   卖单数量: ${sellAmount.toFixed(8)} ${this.config.get('baseCurrency')}`);
-            console.log(`   库存偏差: ${((currentInventory - targetInventory) / totalInventoryValue * 100).toFixed(4)}%`);
+            
+            // 紧凑输出订单信息
+            const inventorySkew = ((currentInventory - targetInventory) / totalInventoryValue * 100).toFixed(2);
+            console.log(`🔄下单 | 买: ${buyAmount.toFixed(4)}@${optimalBid.toFixed(2)} | 卖: ${sellAmount.toFixed(4)}@${optimalAsk.toFixed(2)} | 库存偏差: ${inventorySkew}%`);
             // 并发创建买单和卖单
             const orderTasks = [];
             // 买单
             orderTasks.push((async () => {
                 if (buyAmount > 0 && optimalBid > 0) {
-                    console.log('\n🟢 创建买单:');
-                    console.log(`   价格: ${optimalBid.toFixed(2)} USDT`);
-                    console.log(`   数量: ${buyAmount.toFixed(8)} BTC`);
-                    console.log(`   价值: ${(buyAmount * optimalBid).toFixed(2)} USDT`);
                     const buyValidation = this.riskManager.validateOrder('buy', buyAmount, optimalBid, this.exchangeManager.getBalances());
                     if (buyValidation.valid) {
-                        console.log('   ✅ 风险验证通过');
-                        const buyClientOrderId = Helpers.generateUniqueId(); // 生成唯一的 clientOrderId
+                        const buyClientOrderId = Helpers.generateUniqueId();
                         const buyOrder = await this.createOrder('buy', buyAmount, optimalBid, buyClientOrderId);
                         if (buyOrder) {
                             this.activeOrders.set(buyOrder.id, buyOrder);
-                            console.log(`   ✅ 买单创建成功 - ID: ${buyOrder.id}`);
+                            console.log(`✅买单 #${buyOrder.id.slice(-6)} | ${buyAmount.toFixed(4)}@${optimalBid.toFixed(2)}`);
                             this.logger.info('买单创建成功', {
                                 orderId: buyOrder.id,
                                 clientOrderId: buyClientOrderId,
@@ -942,39 +932,32 @@ class AvellanedaStrategy extends EventEmitter {
                                 status: buyOrder.status
                             });
                         } else {
-                            console.log('   ❌ 买单创建失败');
+                            console.log(`❌买单创建失败`);
                         }
                     } else {
-                        console.log('   ❌ 风险验证失败:', buyValidation.reason);
+                        console.log(`❌买单风险拒绝: ${buyValidation.reason}`);
                         this.logger.warn('买单被风险管理器拒绝', buyValidation);
                     }
                 } else {
-                    console.log('\n🟢 跳过买单创建:');
-                    console.log(`   原因: ${buyAmount <= 0 ? '数量为零' : '价格无效'}`);
-                    console.log(`   数量: ${buyAmount.toFixed(8)} BTC`);
-                    console.log(`   价格: ${optimalBid.toFixed(2)} USDT`);
+                    const reason = buyAmount <= 0 ? '数量为零' : '价格无效';
+                    console.log(`⏭️跳过买单: ${reason}`);
                     this.logger.debug('跳过买单创建', {
                         buyAmount: buyAmount,
                         optimalBid: optimalBid,
-                        reason: buyAmount <= 0 ? '数量为零' : '价格无效'
+                        reason: reason
                     });
                 }
             })());
             // 卖单
             orderTasks.push((async () => {
                 if (sellAmount > 0 && optimalAsk > 0) {
-                    console.log('\n🔴 创建卖单:');
-                    console.log(`   价格: ${optimalAsk.toFixed(2)} USDT`);
-                    console.log(`   数量: ${sellAmount.toFixed(8)} BTC`);
-                    console.log(`   价值: ${(sellAmount * optimalAsk).toFixed(2)} USDT`);
                     const sellValidation = this.riskManager.validateOrder('sell', sellAmount, optimalAsk, this.exchangeManager.getBalances());
                     if (sellValidation.valid) {
-                        console.log('   ✅ 风险验证通过');
-                        const sellClientOrderId = Helpers.generateUniqueId(); // 生成唯一的 clientOrderId
+                        const sellClientOrderId = Helpers.generateUniqueId();
                         const sellOrder = await this.createOrder('sell', sellAmount, optimalAsk, sellClientOrderId);
                         if (sellOrder) {
                             this.activeOrders.set(sellOrder.id, sellOrder);
-                            console.log(`   ✅ 卖单创建成功 - ID: ${sellOrder.id}`);
+                            console.log(`✅卖单 #${sellOrder.id.slice(-6)} | ${sellAmount.toFixed(4)}@${optimalAsk.toFixed(2)}`);
                             this.logger.info('卖单创建成功', {
                                 orderId: sellOrder.id,
                                 clientOrderId: sellClientOrderId,
@@ -983,33 +966,28 @@ class AvellanedaStrategy extends EventEmitter {
                                 status: sellOrder.status
                             });
                         } else {
-                            console.log('   ❌ 卖单创建失败');
+                            console.log(`❌卖单创建失败`);
                         }
                     } else {
-                        console.log('   ❌ 风险验证失败:', sellValidation.reason);
+                        console.log(`❌卖单风险拒绝: ${sellValidation.reason}`);
                         this.logger.warn('卖单被风险管理器拒绝', sellValidation);
                     }
                 } else {
-                    console.log('\n🔴 跳过卖单创建:');
-                    console.log(`   原因: ${sellAmount <= 0 ? '数量为零' : '价格无效'}`);
-                    console.log(`   数量: ${sellAmount.toFixed(8)} BTC`);
-                    console.log(`   价格: ${optimalAsk.toFixed(2)} USDT`);
+                    const reason = sellAmount <= 0 ? '数量为零' : '价格无效';
+                    console.log(`⏭️跳过卖单: ${reason}`);
                     this.logger.debug('跳过卖单创建', {
                         sellAmount: sellAmount,
                         optimalAsk: optimalAsk,
-                        reason: sellAmount <= 0 ? '数量为零' : '价格无效'
+                        reason: reason
                     });
                 }
             })());
             // 并发执行买卖单下单
             await Promise.all(orderTasks);
-            console.log('\n📋 订单创建完成:');
-            console.log(`   活跃订单数: ${this.activeOrders.size}个`);
-            console.log(`   买单数量: ${buyAmount.toFixed(8)} BTC`);
-            console.log(`   卖单数量: ${sellAmount.toFixed(8)} BTC`);
-            console.log(`   最优买价: ${optimalBid.toFixed(2)} USDT`);
-            console.log(`   最优卖价: ${optimalAsk.toFixed(2)} USDT`);
-            console.log('─'.repeat(50));
+            
+            // 紧凑输出订单创建结果
+            console.log(`📋订单完成 | 活跃: ${this.activeOrders.size}个`);
+            
             this.logger.info('订单创建完成', {
                 buyAmount,
                 sellAmount,
@@ -1043,7 +1021,6 @@ class AvellanedaStrategy extends EventEmitter {
 
                 if (order && order.id) {
                     // 订单已成功提交并返回ID
-                    console.log(`   ✅ 订单提交成功 - ID: ${order.id}`);
                     this.logger.info('Order submitted', {
                         id: order.id,
                         clientOrderId: clientOrderId,
@@ -1055,12 +1032,10 @@ class AvellanedaStrategy extends EventEmitter {
                     return order;
                 } else {
                     // 订单提交失败，但没有抛出异常（例如返回null或空对象）
-                    console.log(`   ❌ 订单提交失败 - 返回无效订单对象`);
                     throw new Error('无效订单返回');
                 }
             } catch (error) {
                 attempt++;
-                console.log(`   ❌ 第${attempt}次下单请求失败: ${error.message}`);
                 this.logger.warn('下单请求失败', {
                     side,
                     amount,
@@ -1072,22 +1047,17 @@ class AvellanedaStrategy extends EventEmitter {
 
                 // 如果是超时错误，尝试通过 clientOrderId 查询订单状态
                 if (error.message === '下单请求超时' || error.message.includes('timeout')) {
-                    console.log(`   ⏳ 下单超时，尝试通过 ClientOrderID: ${clientOrderId} 查询订单状态...`);
                     try {
                         const existingOrder = await this.exchangeManager.getOrderByClientOrderId(clientOrderId, this.config.get('symbol'));
                         if (existingOrder && existingOrder.id) {
-                            console.log(`   ✅ 发现现有订单 - ID: ${existingOrder.id}, 状态: ${existingOrder.status}`);
                             this.logger.info('Found existing order after timeout', {
                                 id: existingOrder.id,
                                 clientOrderId: clientOrderId,
                                 status: existingOrder.status
                             });
                             return existingOrder; // 找到现有订单，不再重试
-                        } else {
-                            console.log('   ⚠️ 未找到现有订单，将重试下单');
                         }
                     } catch (queryError) {
-                        console.log(`   ❌ 查询现有订单失败: ${queryError.message}`);
                         this.logger.error('Failed to query existing order by clientOrderId', {
                             clientOrderId,
                             error: queryError.message
@@ -1097,7 +1067,6 @@ class AvellanedaStrategy extends EventEmitter {
 
                 if (attempt < maxRetries) {
                     await this.sleep(1000); // 重试间隔1秒
-                    console.log('   ⏳ 准备重试下单...');
                 } else {
                     this.logger.error('下单最终失败', {
                         side,

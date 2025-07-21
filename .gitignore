@@ -139,7 +139,9 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
 # roo code
-.roo/
+.roo/*
 
 # test
-test/
+test/*
+tests/*
+
