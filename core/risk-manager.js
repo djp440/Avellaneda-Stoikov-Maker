@@ -1,12 +1,14 @@
 const Logger = require('../utils/logger');
 const Helpers = require('../utils/helpers');
+const EventEmitter = require('events');
 
 /**
  * 风险控制管理器
  * 负责监控和管理策略的风险，包括持仓控制、止损、资金管理等
  */
-class RiskManager {
+class RiskManager extends EventEmitter {
     constructor(config) {
+        super();
         this.config = config;
         this.logger = new Logger(config);
         
@@ -420,8 +422,18 @@ class RiskManager {
                 timestamp: new Date().toISOString()
             });
             
-            // 这里应该通知策略停止交易
-            // 实际实现中需要与策略模块通信
+            // 发射紧急停止事件，通知策略和主程序
+            this.emit('emergencyStop', {
+                reason: event.message,
+                timestamp: new Date().toISOString(),
+                event: event
+            });
+            
+            // 发射策略停止事件
+            this.emit('stopStrategy', {
+                reason: 'Emergency stop triggered',
+                event: event
+            });
             
         } catch (error) {
             this.logger.error('触发紧急停止时出错', error);
@@ -701,4 +713,4 @@ class RiskManager {
     }
 }
 
-module.exports = RiskManager; 
+module.exports = RiskManager;

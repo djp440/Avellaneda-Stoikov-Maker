@@ -392,6 +392,9 @@ class AvellanedaMarketMaking {
             }
             console.log('✅ 网络连接测试通过\n');
 
+            // 设置策略事件监听
+            this.setupStrategyEventListeners();
+            
             // 启动策略
             console.log('🎯 启动策略算法...');
             const started = await this.strategy.start();
@@ -546,6 +549,33 @@ class AvellanedaMarketMaking {
                 console.error('停止健康检查时出错:', error.message);
             }
         }
+    }
+
+    /**
+     * 设置策略事件监听
+     */
+    setupStrategyEventListeners() {
+        if (!this.strategy) {
+            return;
+        }
+        
+        // 监听紧急停止事件
+        this.strategy.on('emergencyStop', async (data) => {
+            console.error(`\n🚨 收到紧急停止信号: ${data.reason}`);
+            this.logger.error('主程序收到紧急停止信号', data);
+            
+            // 执行优雅关闭
+            await this.gracefulShutdown('EMERGENCY_STOP');
+        });
+        
+        // 监听策略停止事件
+        this.strategy.on('strategyStop', async (data) => {
+            console.warn(`\n⚠️ 收到策略停止信号: ${data.reason}`);
+            this.logger.warn('主程序收到策略停止信号', data);
+            
+            // 执行优雅关闭
+            await this.gracefulShutdown('STRATEGY_STOP');
+        });
     }
 
     /**
@@ -813,4 +843,4 @@ if (require.main === module) {
     main();
 }
 
-module.exports = AvellanedaMarketMaking; 
+module.exports = AvellanedaMarketMaking;

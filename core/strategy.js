@@ -4,12 +4,14 @@ const ExchangeManager = require('./exchange');
 const RiskManager = require('./risk-manager');
 const Helpers = require('../utils/helpers');
 const Logger = require('../utils/logger');
+const EventEmitter = require('events');
 
 /**
  * Avellaneda做市策略核心逻辑
  */
-class AvellanedaStrategy {
+class AvellanedaStrategy extends EventEmitter {
     constructor(config) {
+        super();
         this.config = config;
         this.logger = new Logger(config);
         
@@ -60,6 +62,9 @@ class AvellanedaStrategy {
         // 设置交易所事件监听
         this.setupExchangeEventListeners();
         
+        // 设置风险管理器事件监听
+        this.setupRiskManagerEventListeners();
+        
         this.logger.info('Avellaneda策略已初始化', {
             orderRefreshTime: this.orderRefreshTime,
             filledOrderDelay: this.filledOrderDelay,
@@ -98,6 +103,21 @@ class AvellanedaStrategy {
 
         this.exchangeManager.on('connectionRestored', () => {
             this.handleConnectionRestored();
+        });
+    }
+
+    /**
+     * 设置风险管理器事件监听
+     */
+    setupRiskManagerEventListeners() {
+        // 监听紧急停止事件
+        this.riskManager.on('emergencyStop', (data) => {
+            this.handleEmergencyStop(data);
+        });
+
+        // 监听策略停止事件
+        this.riskManager.on('stopStrategy', (data) => {
+            this.handleStrategyStop(data);
         });
     }
 
@@ -171,6 +191,34 @@ class AvellanedaStrategy {
         // 连接恢复时同步挂单
         this.syncActiveOrdersFromExchange();
         // 可以在这里添加连接恢复时的其他处理逻辑
+    }
+
+    /**
+     * 处理紧急停止事件
+     */
+    handleEmergencyStop(data) {
+        this.logger.error('收到紧急停止信号', data);
+        console.error(`策略: 收到紧急停止信号 - ${data.reason}`);
+        
+        // 立即停止策略
+        this.isRunning = false;
+        
+        // 发射事件通知主程序
+        this.emit('emergencyStop', data);
+    }
+
+    /**
+     * 处理策略停止事件
+     */
+    handleStrategyStop(data) {
+        this.logger.warn('收到策略停止信号', data);
+        console.warn(`策略: 收到策略停止信号 - ${data.reason}`);
+        
+        // 停止策略运行
+        this.isRunning = false;
+        
+        // 发射事件通知主程序
+        this.emit('strategyStop', data);
     }
 
     /**
@@ -428,9 +476,9 @@ class AvellanedaStrategy {
                     // 检查风险状态
                     const riskStatus = this.riskManager.getRiskStatus();
                     if (riskStatus.state.isEmergencyStop) {
-                        this.logger.warn('策略因紧急停止而暂停');
-                        console.warn('AvellanedaStrategy: mainLoop() - 策略因紧急停止而暂停');
-                        await this.sleep(10000); // 紧急停止时等待更长时间
+                        this.logger.error('策略因紧急停止而终止');
+                        console.error('AvellanedaStrategy: mainLoop() - 策略因紧急停止而终止');
+                        this.isRunning = false; // 立即停止主循环
                         return;
                     }
                     // 检查指标是否准备就绪
@@ -1179,4 +1227,4 @@ class AvellanedaStrategy {
     }
 }
 
-module.exports = AvellanedaStrategy; 
+module.exports = AvellanedaStrategy;
