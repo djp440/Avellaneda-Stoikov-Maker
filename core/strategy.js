@@ -788,6 +788,16 @@ class AvellanedaStrategy extends EventEmitter {
             return true;
         }
         
+        // 检查活跃订单数量，如果少于2个（买单+卖单），立即更新
+        const activeOrdersCount = this.activeOrders.size;
+        if (activeOrdersCount < 2) {
+            this.logger.info('检测到活跃订单数量不足，立即更新订单', {
+                currentOrders: activeOrdersCount,
+                expectedOrders: 2
+            });
+            return true;
+        }
+        
         // 检查订单刷新时间
         if (timeSinceLastUpdate < this.orderRefreshTime) {
             return false;
@@ -836,6 +846,9 @@ class AvellanedaStrategy extends EventEmitter {
     async updateOrders() {
         this.logger.info('开始执行 updateOrders 流程');
         try {
+            // 重置强制更新标志
+            this.forceOrderUpdate = false;
+            
             // 取消现有订单
             this.logger.info('调用 cancelActiveOrders 取消现有订单');
             await this.cancelActiveOrders();
@@ -1216,20 +1229,7 @@ class AvellanedaStrategy extends EventEmitter {
             
             // 标记需要强制更新订单（订单成交后立即更新）
             this.forceOrderUpdate = true;
-            
-            // 延迟创建新订单
-            this.logger.info(`订单成交后延迟 ${this.filledOrderDelay} 秒，然后强制更新订单`);
-            setTimeout(async () => {
-                if (this.isRunning) {
-                    this.logger.info('延迟结束，开始强制更新订单...');
-                    // 重置lastUpdateTime以确保立即更新
-                    this.lastUpdateTime = 0;
-                    await this.updateOrders();
-                    this.forceOrderUpdate = false;
-                } else {
-                    this.logger.warn('策略未运行，跳过延迟后的订单更新');
-                }
-            }, this.filledOrderDelay * 1000);
+            this.logger.info('订单成交，已设置强制更新标志，等待下次策略循环时更新订单');
             
         } catch (error) {
             this.logger.error('处理订单成交时出错', {
