@@ -43,13 +43,14 @@ class RiskManager extends EventEmitter {
             unrealizedPnL: 0, // 未实现盈亏
             realizedPnL: 0, // 已实现盈亏
             totalPnL: 0, // 总盈亏
-            maxUnrealizedPnL: 0, // 最大未实现盈利
+            maxAccountValue: 0, // 历史最高账户价值 (用于回撤计算)
             maxDrawdownReached: 0, // 达到的最大回撤
             dailyPnL: 0, // 当日盈亏
             lastResetTime: Date.now(), // 上次重置时间
             isEmergencyStop: false, // 是否紧急停止
             riskAlerts: [], // 风险警报
             lastRiskCheck: 0, // 上次风险检查时间
+            isInitialized: false, // 是否已初始化账户价值
         };
         
         // 历史数据
@@ -563,9 +564,25 @@ class RiskManager extends EventEmitter {
         const oldValue = this.riskState.totalAccountValue;
         this.riskState.totalAccountValue = totalAccountValue;
         
+        // 初始化或更新历史最高账户价值
+        if (!this.riskState.isInitialized) {
+            this.riskState.maxAccountValue = totalAccountValue;
+            this.riskState.isInitialized = true;
+            this.logger.info('风险管理器: 初始化账户价值', { 
+                initialValue: totalAccountValue.toFixed(2) 
+            });
+        } else if (totalAccountValue > this.riskState.maxAccountValue) {
+            this.riskState.maxAccountValue = totalAccountValue;
+            this.logger.info('风险管理器: 更新历史最高账户价值', { 
+                newPeak: totalAccountValue.toFixed(2),
+                previousPeak: this.riskState.maxAccountValue.toFixed(2)
+            });
+        }
+        
         this.logger.debug('账户总价值已更新', {
             oldValue,
-            newValue: totalAccountValue
+            newValue: totalAccountValue,
+            maxAccountValue: this.riskState.maxAccountValue
         });
     }
     
@@ -595,25 +612,26 @@ class RiskManager extends EventEmitter {
      * 计算回撤
      */
     calculateDrawdown() {
-        // 回撤计算应基于账户总价值的峰值和谷值，而不是单一的未实现盈亏
-        // 这里的实现可能不完全符合标准的回撤定义，但会根据现有逻辑进行调整
-        // 如果 maxUnrealizedPnL 是历史最高账户价值，unrealizedPnL 是当前账户价值
-        // 那么回撤 = (最高账户价值 - 当前账户价值) / 最高账户价值 * 100%
-
-        // 假设 maxUnrealizedPnL 实际上是历史最高账户总价值
-        // 并且 unrealizedPnL 实际上是当前账户总价值
-        // 那么计算回撤的逻辑是：
-        // drawdown = (峰值 - 当前值) / 峰值 * 100%
-
-        const peakValue = this.riskState.maxUnrealizedPnL; // 假设这是历史最高账户价值
-        const currentValue = this.riskState.unrealizedPnL; // 假设这是当前账户价值
+        // 修复后的回撤计算逻辑：基于账户总价值的峰值和当前值
+        // 回撤 = (历史最高账户价值 - 当前账户价值) / 历史最高账户价值 * 100%
+        
+        const peakValue = this.riskState.maxAccountValue; // 历史最高账户价值
+        const currentValue = this.riskState.totalAccountValue; // 当前账户价值
 
         this.logger.debug('风险管理器: 计算回撤', {
             peakValue: peakValue,
-            currentValue: currentValue
+            currentValue: currentValue,
+            isInitialized: this.riskState.isInitialized
         });
 
-        if (peakValue <= 0) { // 如果峰值为0或负数，无法计算回撤
+        // 如果还未初始化或峰值为0，返回0回撤
+        if (!this.riskState.isInitialized || peakValue <= 0) {
+            this.logger.debug('风险管理器: 账户价值未初始化或峰值无效，回撤为0');
+            return 0;
+        }
+        
+        // 如果当前价值大于峰值，说明没有回撤
+        if (currentValue >= peakValue) {
             return 0;
         }
         
@@ -622,7 +640,11 @@ class RiskManager extends EventEmitter {
         // 更新最大回撤
         if (drawdown > this.riskState.maxDrawdownReached) {
             this.riskState.maxDrawdownReached = drawdown;
-            this.logger.info('风险管理器: 达到新的最大回撤', { maxDrawdownReached: drawdown });
+            this.logger.info('风险管理器: 达到新的最大回撤', { 
+                maxDrawdownReached: drawdown.toFixed(2),
+                peakValue: peakValue.toFixed(2),
+                currentValue: currentValue.toFixed(2)
+            });
         }
         
         // 回撤不应为负数
