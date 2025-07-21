@@ -8,7 +8,7 @@ class StrategyCore {
         this.config = strategy.config;
         
         // 策略参数
-        this.riskAversion = this.config.get('riskAversion') || 0.1;
+        this.riskAversion = this.config.get('riskFactor') || 0.1;
         this.timeHorizon = this.config.get('timeHorizon') || 1; // 小时
         this.minSpread = this.config.get('minSpread') || 0.001; // 最小价差
         this.maxSpread = this.config.get('maxSpread') || 0.01; // 最大价差
@@ -343,8 +343,8 @@ class StrategyCore {
      * 更新策略参数
      */
     updateParameters(params) {
-        if (params.riskAversion !== undefined) {
-            this.riskAversion = params.riskAversion;
+        if (params.riskFactor !== undefined) {
+            this.riskAversion = params.riskFactor;
         }
         if (params.timeHorizon !== undefined) {
             this.timeHorizon = params.timeHorizon;
@@ -382,9 +382,9 @@ class StrategyCore {
     validateParameters(params) {
         const errors = [];
         
-        if (params.riskAversion !== undefined) {
-            if (typeof params.riskAversion !== 'number' || params.riskAversion <= 0) {
-                errors.push('riskAversion must be a positive number');
+        if (params.riskFactor !== undefined) {
+            if (typeof params.riskFactor !== 'number' || params.riskFactor <= 0) {
+                errors.push('riskFactor must be a positive number');
             }
         }
         

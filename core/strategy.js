@@ -121,7 +121,7 @@ class AvellanedaStrategy extends EventEmitter {
      * 验证配置
      */
     validateConfig() {
-        const requiredFields = ['symbol', 'orderAmount', 'riskAversion'];
+        const requiredFields = ['symbol', 'orderAmount', 'riskFactor'];
         
         for (const field of requiredFields) {
             if (!this.config.get(field)) {
