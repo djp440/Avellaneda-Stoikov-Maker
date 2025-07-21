@@ -76,9 +76,14 @@ class AvellanedaStrategy extends EventEmitter {
         // 设置风险管理器事件监听
         this.setupRiskManagerEventListeners();
         
+        // 订单监控配置
+        this.orderMonitoringInterval = config.get('orderMonitoringInterval') || 5000; // 默认5秒检查一次
+        this.orderMonitoringTimer = null;
+        
         this.logger.info('Avellaneda策略已初始化', {
             orderRefreshTime: this.orderRefreshTime,
             filledOrderDelay: this.filledOrderDelay,
+            orderMonitoringInterval: this.orderMonitoringInterval,
             riskManager: 'enabled'
         });
     }
@@ -352,6 +357,10 @@ class AvellanedaStrategy extends EventEmitter {
             this.mainLoop();
             console.log('AvellanedaStrategy: start() - 主循环已启动');
             
+            // 启动订单监控
+            this.startOrderMonitoring();
+            console.log('AvellanedaStrategy: start() - 订单监控已启动');
+            
             console.log('AvellanedaStrategy: start() 成功完成');
             return true;
         } catch (error) {
@@ -380,6 +389,10 @@ class AvellanedaStrategy extends EventEmitter {
             this.isShuttingDown = true;
             console.log('\n🛑 开始停止策略...\n');
             this.logger.info('停止策略');
+            
+            // 停止订单监控
+            this.stopOrderMonitoring();
+            console.log('✅ 订单监控已停止');
 
             // 注意：健康检查由主程序管理，策略类不直接控制
 
@@ -1291,6 +1304,106 @@ class AvellanedaStrategy extends EventEmitter {
      */
     sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
+    }
+    
+    /**
+     * 启动订单监控
+     */
+    startOrderMonitoring() {
+        if (this.orderMonitoringTimer) {
+            this.logger.warn('订单监控已在运行中');
+            return;
+        }
+        
+        this.logger.info('启动订单状态监控', {
+            interval: this.orderMonitoringInterval
+        });
+        
+        this.orderMonitoringTimer = setInterval(async () => {
+            try {
+                await this.monitorOrderStatus();
+            } catch (error) {
+                this.logger.error('订单监控过程中出错', {
+                    errorName: error.name,
+                    errorMessage: error.message
+                });
+            }
+        }, this.orderMonitoringInterval);
+    }
+    
+    /**
+     * 停止订单监控
+     */
+    stopOrderMonitoring() {
+        if (this.orderMonitoringTimer) {
+            clearInterval(this.orderMonitoringTimer);
+            this.orderMonitoringTimer = null;
+            this.logger.info('订单监控已停止');
+        }
+    }
+    
+    /**
+     * 监控订单状态
+     */
+    async monitorOrderStatus() {
+        if (!this.isRunning || this.activeOrders.size === 0) {
+            return;
+        }
+        
+        this.logger.debug('开始监控订单状态', {
+            activeOrdersCount: this.activeOrders.size
+        });
+        
+        // 创建当前活跃订单的副本，避免在迭代过程中修改
+        const ordersToCheck = new Map(this.activeOrders);
+        
+        for (const [orderId, localOrder] of ordersToCheck) {
+            try {
+                // 查询远程订单状态
+                const remoteOrder = await this.exchangeManager.getOrder(orderId);
+                
+                // 检查状态是否发生变化
+                if (remoteOrder.status !== localOrder.status) {
+                    this.logger.info('检测到订单状态变化', {
+                        orderId: orderId,
+                        localStatus: localOrder.status,
+                        remoteStatus: remoteOrder.status,
+                        side: remoteOrder.side,
+                        amount: remoteOrder.amount,
+                        price: remoteOrder.price
+                    });
+                    
+                    // 触发订单更新处理
+                    this.handleOrderUpdate(remoteOrder);
+                }
+                
+            } catch (error) {
+                // 如果订单查询失败，可能是订单已被取消或不存在
+                if (error.message.includes('Order not found') || 
+                    error.message.includes('order not found') ||
+                    error.message.includes('Invalid order')) {
+                    this.logger.warn('订单不存在，从活跃订单列表中移除', {
+                        orderId: orderId,
+                        error: error.message
+                    });
+                    
+                    // 创建一个取消状态的订单对象
+                    const canceledOrder = {
+                        ...localOrder,
+                        status: 'canceled',
+                        timestamp: Date.now()
+                    };
+                    
+                    this.handleOrderUpdate(canceledOrder);
+                } else {
+                    this.logger.error('查询订单状态失败', {
+                        orderId: orderId,
+                        errorName: error.name,
+                        errorMessage: error.message
+                    });
+                }
+            }
+        }
     }
 }
 
