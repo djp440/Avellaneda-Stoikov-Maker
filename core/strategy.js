@@ -788,14 +788,59 @@ class AvellanedaStrategy extends EventEmitter {
             return true;
         }
         
-        // 检查活跃订单数量，如果少于2个（买单+卖单），立即更新
-        const activeOrdersCount = this.activeOrders.size;
-        if (activeOrdersCount < 2) {
-            this.logger.info('检测到活跃订单数量不足，立即更新订单', {
-                currentOrders: activeOrdersCount,
-                expectedOrders: 2
+        // 智能订单管理：允许的情况下最多1个买单和1个卖单存在
+        // 检查当前余额，确定应该有哪些类型的订单
+        const balances = this.exchangeManager.getBalances();
+        const { optimalBid, optimalAsk } = this.strategyState;
+        
+        // 计算订单数量
+        const baseAmount = this.config.get('orderAmount');
+        const buyAmount = this.calculator.calculateOrderAmount(
+            baseAmount, this.strategyState.currentInventory, 
+            this.strategyState.targetInventory, this.strategyState.totalInventoryValue, true
+        );
+        const sellAmount = this.calculator.calculateOrderAmount(
+            baseAmount, this.strategyState.currentInventory, 
+            this.strategyState.targetInventory, this.strategyState.totalInventoryValue, false
+        );
+        
+        // 检查是否可以创建买单和卖单
+        const canCreateBuy = buyAmount > 0 && optimalBid > 0 && 
+            this.riskManager.validateOrder('buy', buyAmount, optimalBid, balances).valid;
+        const canCreateSell = sellAmount > 0 && optimalAsk > 0 && 
+            this.riskManager.validateOrder('sell', sellAmount, optimalAsk, balances).valid;
+        
+        // 计算当前活跃订单类型
+        let activeBuyOrders = 0;
+        let activeSellOrders = 0;
+        for (const order of this.activeOrders.values()) {
+            if (order.side === 'buy') activeBuyOrders++;
+            else if (order.side === 'sell') activeSellOrders++;
+        }
+        
+        // 检查是否需要补充订单（智能策略：只在允许的情况下要求对应订单存在）
+        const needBuyOrder = canCreateBuy && activeBuyOrders === 0;
+        const needSellOrder = canCreateSell && activeSellOrders === 0;
+        
+        if (needBuyOrder || needSellOrder) {
+            this.logger.info('检测到需要补充订单（智能策略）', {
+                activeBuyOrders,
+                activeSellOrders,
+                canCreateBuy,
+                canCreateSell,
+                needBuyOrder,
+                needSellOrder,
+                strategy: '允许的情况下最多1个买单和1个卖单存在'
             });
             return true;
+        } else {
+            this.logger.debug('当前订单状态符合智能策略要求', {
+                canCreateBuy,
+                canCreateSell,
+                activeBuyOrders,
+                activeSellOrders,
+                strategy: '允许的情况下最多1个买单和1个卖单存在'
+            });
         }
         
         // 检查订单刷新时间
@@ -809,7 +854,6 @@ class AvellanedaStrategy extends EventEmitter {
         }
         
         // 检查价格是否有显著变化（避免无意义的订单更新）
-        const { optimalBid, optimalAsk } = this.strategyState;
         const { bid: lastBid, ask: lastAsk } = this.lastOrderPrices;
         
         // 如果是第一次创建订单，直接返回true
