@@ -52,15 +52,24 @@ class EventHandler extends EventEmitter {
     setupRiskManagerEventListeners() {
         const { riskManager } = this.strategy;
 
-        // 监听紧急停止事件
+        // 监听紧急停止信号
         riskManager.on('emergencyStop', (data) => {
             this.handleEmergencyStop(data);
         });
 
-        // 监听策略停止事件
-        riskManager.on('stopStrategy', (data) => {
+        // 监听策略停止信号
+        riskManager.on('strategyStop', (data) => {
             this.handleStrategyStop(data);
         });
+    }
+
+    /**
+     * 设置所有事件监听器
+     */
+    setupEventListeners() {
+        this.setupExchangeEventListeners();
+        this.setupRiskManagerEventListeners();
+        this.logger.info('事件监听器设置完成');
     }
 
     /**
