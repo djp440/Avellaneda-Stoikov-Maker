@@ -21,6 +21,7 @@ module.exports = {
     updateInterval: 5000,                  // 更新间隔，策略执行频率，单位为毫秒
     maxOrders: 10,                         // 最大订单数量，同时存在的订单上限
     orderTimeout: 15000,                   // 订单超时时间，单位为毫秒，超时后取消订单
+    priceChangeThreshold: 0.001,           // 价格变化阈值，只有当价格变化超过此百分比时才更新订单，避免无意义的订单更新
 
     // 风险管理 - 持仓控制
     maxPositionValuePercent: 20.0,         // 最大持仓价值百分比，相对于账户总价值
@@ -64,4 +65,4 @@ module.exports = {
         username: '',                      // 代理用户名（如果需要认证）
         password: ''                       // 代理密码（如果需要认证）
     }
-}; 
+};

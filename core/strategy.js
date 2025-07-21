@@ -59,6 +59,16 @@ class AvellanedaStrategy extends EventEmitter {
             totalInventoryValue: 0
         };
         
+        // 上次订单价格记录（用于避免无意义的订单更新）
+        this.lastOrderPrices = {
+            bid: 0,
+            ask: 0,
+            timestamp: 0
+        };
+        
+        // 价格变化阈值配置
+        this.priceChangeThreshold = config.get('priceChangeThreshold') || 0.001; // 默认0.1%的价格变化阈值
+        
         // 设置交易所事件监听
         this.setupExchangeEventListeners();
         
@@ -721,7 +731,23 @@ class AvellanedaStrategy extends EventEmitter {
         const timeSinceLastUpdate = (now - this.lastUpdateTime) / 1000;
         const timeUntilNextUpdate = this.orderRefreshTime - timeSinceLastUpdate;
         
-        console.log(`⏰ 更新: 上次 ${timeSinceLastUpdate.toFixed(1)}s | 下次 ${timeUntilNextUpdate.toFixed(1)}s | 指标变化 ${this.indicators.hasChanged() ? '✅' : '❌'} | 活跃订单 ${this.activeOrders.size}个`);
+        // 计算价格变化
+        const { optimalBid, optimalAsk } = this.strategyState;
+        const { bid: lastBid, ask: lastAsk } = this.lastOrderPrices;
+        let priceChangeInfo = '';
+        
+        if (lastBid > 0 && lastAsk > 0) {
+            const bidChangePercent = Math.abs((optimalBid - lastBid) / lastBid);
+            const askChangePercent = Math.abs((optimalAsk - lastAsk) / lastAsk);
+            const maxChange = Math.max(bidChangePercent, askChangePercent);
+            const thresholdMet = maxChange >= this.priceChangeThreshold;
+            
+            priceChangeInfo = `价格变化 ${(maxChange * 100).toFixed(3)}%/${(this.priceChangeThreshold * 100).toFixed(1)}% ${thresholdMet ? '✅' : '❌'}`;
+        } else {
+            priceChangeInfo = '价格变化 首次 ✅';
+        }
+        
+        console.log(`⏰ 更新: 上次 ${timeSinceLastUpdate.toFixed(1)}s | 下次 ${timeUntilNextUpdate.toFixed(1)}s | 指标变化 ${this.indicators.hasChanged() ? '✅' : '❌'} | ${priceChangeInfo} | 活跃订单 ${this.activeOrders.size}个`);
     }
 
     /**
@@ -741,7 +767,36 @@ class AvellanedaStrategy extends EventEmitter {
             return false;
         }
         
-        return true;
+        // 检查价格是否有显著变化（避免无意义的订单更新）
+        const { optimalBid, optimalAsk } = this.strategyState;
+        const { bid: lastBid, ask: lastAsk } = this.lastOrderPrices;
+        
+        // 如果是第一次创建订单，直接返回true
+        if (lastBid === 0 || lastAsk === 0) {
+            return true;
+        }
+        
+        // 计算价格变化百分比
+        const bidChangePercent = Math.abs((optimalBid - lastBid) / lastBid);
+        const askChangePercent = Math.abs((optimalAsk - lastAsk) / lastAsk);
+        
+        // 只有当买价或卖价变化超过阈值时才更新订单
+        const shouldUpdate = bidChangePercent >= this.priceChangeThreshold || 
+                           askChangePercent >= this.priceChangeThreshold;
+        
+        if (!shouldUpdate) {
+            this.logger.debug('价格变化未达到阈值，跳过订单更新', {
+                bidChange: (bidChangePercent * 100).toFixed(4) + '%',
+                askChange: (askChangePercent * 100).toFixed(4) + '%',
+                threshold: (this.priceChangeThreshold * 100).toFixed(4) + '%',
+                currentBid: optimalBid.toFixed(2),
+                currentAsk: optimalAsk.toFixed(2),
+                lastBid: lastBid.toFixed(2),
+                lastAsk: lastAsk.toFixed(2)
+            });
+        }
+        
+        return shouldUpdate;
     }
 
     /**
@@ -758,8 +813,21 @@ class AvellanedaStrategy extends EventEmitter {
             this.logger.info('调用 createOrders 创建新订单');
             await this.createOrders();
             
+            // 更新上次订单价格记录
+            this.lastOrderPrices = {
+                bid: this.strategyState.optimalBid,
+                ask: this.strategyState.optimalAsk,
+                timestamp: Date.now()
+            };
+            
             this.lastUpdateTime = Date.now();
-            this.logger.info('订单更新流程完成', { lastUpdateTime: new Date(this.lastUpdateTime).toISOString() });
+            this.logger.info('订单更新流程完成', { 
+                lastUpdateTime: new Date(this.lastUpdateTime).toISOString(),
+                updatedPrices: {
+                    bid: this.lastOrderPrices.bid.toFixed(2),
+                    ask: this.lastOrderPrices.ask.toFixed(2)
+                }
+            });
             console.log('✅ 订单更新完成');
             
         } catch (error) {
