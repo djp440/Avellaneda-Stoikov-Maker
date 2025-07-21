@@ -688,7 +688,7 @@ class RiskManager extends EventEmitter {
     /**
      * 验证订单风险
      */
-    validateOrder(side, amount, price) {
+    validateOrder(side, amount, price, balances = null) {
         const orderValue = amount * price;
         const totalAccountValue = this.riskState.totalAccountValue;
         
@@ -696,9 +696,44 @@ class RiskManager extends EventEmitter {
         if (this.riskState.isEmergencyStop) {
             return {
                 valid: false,
-                reason: 'Emergency stop is active',
+                reason: '紧急停止状态激活',
                 type: 'EMERGENCY_STOP'
             };
+        }
+        
+        // 余额检查 - 这是新增的关键功能
+        if (balances) {
+            const baseCurrency = this.config.get('baseCurrency') || 'BTC';
+            const quoteCurrency = this.config.get('quoteCurrency') || 'USDT';
+            
+            if (side === 'sell') {
+                // 卖单检查：需要有足够的基础货币
+                const baseBalance = balances[baseCurrency];
+                if (!baseBalance || baseBalance.free < amount) {
+                    return {
+                        valid: false,
+                        reason: `余额不足：需要 ${amount.toFixed(8)} ${baseCurrency}，可用 ${(baseBalance?.free || 0).toFixed(8)} ${baseCurrency}`,
+                        type: 'INSUFFICIENT_BALANCE',
+                        required: amount,
+                        available: baseBalance?.free || 0,
+                        currency: baseCurrency
+                    };
+                }
+            } else if (side === 'buy') {
+                // 买单检查：需要有足够的计价货币
+                const quoteBalance = balances[quoteCurrency];
+                const requiredQuote = orderValue;
+                if (!quoteBalance || quoteBalance.free < requiredQuote) {
+                    return {
+                        valid: false,
+                        reason: `余额不足：需要 ${requiredQuote.toFixed(2)} ${quoteCurrency}，可用 ${(quoteBalance?.free || 0).toFixed(2)} ${quoteCurrency}`,
+                        type: 'INSUFFICIENT_BALANCE',
+                        required: requiredQuote,
+                        available: quoteBalance?.free || 0,
+                        currency: quoteCurrency
+                    };
+                }
+            }
         }
         
         // 如果账户总价值为0，跳过订单限制检查
@@ -714,7 +749,7 @@ class RiskManager extends EventEmitter {
         if (amount > maxOrderSize) {
             return {
                 valid: false,
-                reason: `Order size ${amount} exceeds maximum ${maxOrderSize.toFixed(2)} (${this.riskConfig.maxOrderSizePercent}%)`,
+                reason: `订单数量 ${amount} 超过最大限制 ${maxOrderSize.toFixed(2)} (${this.riskConfig.maxOrderSizePercent}%)`,
                 type: 'ORDER_SIZE_LIMIT'
             };
         }
@@ -723,7 +758,7 @@ class RiskManager extends EventEmitter {
         if (orderValue > maxOrderValue) {
             return {
                 valid: false,
-                reason: `Order value ${orderValue} exceeds maximum ${maxOrderValue.toFixed(2)} (${this.riskConfig.maxOrderValuePercent}%)`,
+                reason: `订单价值 ${orderValue} 超过最大限制 ${maxOrderValue.toFixed(2)} (${this.riskConfig.maxOrderValuePercent}%)`,
                 type: 'ORDER_VALUE_LIMIT'
             };
         }

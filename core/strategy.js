@@ -834,7 +834,7 @@ class AvellanedaStrategy extends EventEmitter {
                     console.log(`   价格: ${optimalBid.toFixed(2)} USDT`);
                     console.log(`   数量: ${buyAmount.toFixed(8)} BTC`);
                     console.log(`   价值: ${(buyAmount * optimalBid).toFixed(2)} USDT`);
-                    const buyValidation = this.riskManager.validateOrder('buy', buyAmount, optimalBid);
+                    const buyValidation = this.riskManager.validateOrder('buy', buyAmount, optimalBid, this.exchangeManager.getBalances());
                     if (buyValidation.valid) {
                         console.log('   ✅ 风险验证通过');
                         const buyClientOrderId = Helpers.generateUniqueId(); // 生成唯一的 clientOrderId
@@ -875,7 +875,7 @@ class AvellanedaStrategy extends EventEmitter {
                     console.log(`   价格: ${optimalAsk.toFixed(2)} USDT`);
                     console.log(`   数量: ${sellAmount.toFixed(8)} BTC`);
                     console.log(`   价值: ${(sellAmount * optimalAsk).toFixed(2)} USDT`);
-                    const sellValidation = this.riskManager.validateOrder('sell', sellAmount, optimalAsk);
+                    const sellValidation = this.riskManager.validateOrder('sell', sellAmount, optimalAsk, this.exchangeManager.getBalances());
                     if (sellValidation.valid) {
                         console.log('   ✅ 风险验证通过');
                         const sellClientOrderId = Helpers.generateUniqueId(); // 生成唯一的 clientOrderId
