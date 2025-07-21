@@ -641,6 +641,13 @@ class ExchangeManager extends EventEmitter {
     }
 
     /**
+     * 根据订单ID获取订单信息（别名方法）
+     */
+    async getOrderById(orderId, symbol = null) {
+        return await this.getOrder(orderId, symbol);
+    }
+
+    /**
      * 通过 clientOrderId 获取订单信息
      */
     async getOrderByClientOrderId(clientOrderId, symbol = null) {
@@ -672,25 +679,45 @@ class ExchangeManager extends EventEmitter {
     }
 
     /**
-     * 获取活跃订单
+     * 获取挂单（增强容错处理）
      */
     async getOpenOrders(symbol = null) {
         try {
+            // 检查交易所连接状态
             if (!this.isConnected || !this.exchange) {
-                throw new Error('Exchange not connected');
+                this.logger.warn('交易所未连接，无法获取订单状态', {
+                    isConnected: this.isConnected,
+                    hasExchange: !!this.exchange
+                });
+                return null; // 返回null而不是抛出异常
+            }
+            
+            // 检查网络连接状态
+            if (!this.networkManager.isNetworkAvailable()) {
+                this.logger.warn('网络不可用，跳过订单状态获取', {
+                    networkStatus: this.networkManager.getNetworkStatus()
+                });
+                return null;
             }
 
             const orderSymbol = symbol || this.config.get('symbol');
             const orders = await this.exchange.fetchOpenOrders(orderSymbol);
 
+            this.logger.debug('成功获取挂单状态', {
+                symbol: orderSymbol,
+                orderCount: orders ? orders.length : 0
+            });
+
             return orders;
             
         } catch (error) {
-            this.logger.error('Failed to get open orders', {
+            this.logger.error('获取订单状态失败', {
                 symbol,
-                error: error.message
+                error: error.message,
+                isConnected: this.isConnected,
+                networkAvailable: this.networkManager ? this.networkManager.isNetworkAvailable() : 'unknown'
             });
-            throw error;
+            return null; // 返回null而不是抛出异常，避免程序崩溃
         }
     }
 

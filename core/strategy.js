@@ -239,23 +239,48 @@ class AvellanedaStrategy extends EventEmitter {
     }
 
     /**
-     * 从交易所同步当前挂单到本地activeOrders
+     * 从交易所同步当前挂单到本地activeOrders（增强容错处理）
      */
     async syncActiveOrdersFromExchange() {
         try {
             this.logger.info('开始同步交易所挂单到本地...');
             const openOrders = await this.exchangeManager.getOpenOrders();
-            this.activeOrders.clear();
-            if (Array.isArray(openOrders)) {
-                for (const order of openOrders) {
-                    this.activeOrders.set(order.id, order);
+            
+            // 只有在成功获取到订单数据时才清空本地状态
+            if (openOrders !== null) {
+                const previousOrderCount = this.activeOrders.size;
+                this.activeOrders.clear();
+                
+                if (Array.isArray(openOrders)) {
+                    for (const order of openOrders) {
+                        this.activeOrders.set(order.id, order);
+                    }
+                    this.logger.info(`同步完成，当前活跃挂单数: ${this.activeOrders.size}`, {
+                        previousCount: previousOrderCount,
+                        currentCount: this.activeOrders.size,
+                        syncSuccess: true
+                    });
+                } else {
+                    this.logger.warn('获取到的挂单数据格式无效', {
+                        dataType: typeof openOrders,
+                        data: openOrders
+                    });
                 }
-                this.logger.info(`同步完成，当前活跃挂单数: ${this.activeOrders.size}`);
             } else {
-                this.logger.warn('未能获取到有效的挂单数据');
+                this.logger.warn('无法获取订单状态，保持现有本地状态不变', {
+                    currentActiveOrders: this.activeOrders.size,
+                    reason: '网络连接问题或交易所未连接',
+                    syncSuccess: false
+                });
+                console.log(`⚠️ 网络问题，保持现有订单状态: ${this.activeOrders.size}个`);
             }
         } catch (error) {
-            this.logger.error('同步交易所挂单失败', error);
+            this.logger.error('同步交易所挂单失败，保持现有本地状态', {
+                error: error.message,
+                currentActiveOrders: this.activeOrders.size,
+                syncSuccess: false
+            });
+            console.log(`❌ 订单同步失败，保持现有状态: ${this.activeOrders.size}个`);
         }
     }
 
@@ -859,13 +884,17 @@ class AvellanedaStrategy extends EventEmitter {
                     id: o.id,
                     side: o.side,
                     amount: o.amount,
-                    price: o.price
-                }))
+                    price: o.price,
+                    status: o.status
+                })),
+                reason: '订单数量超过限制（最多2个）'
             });
             console.log(`⚠️ 检测到 ${this.activeOrders.size} 个活跃订单（超过限制），触发紧急清理`);
             
-            // 立即清理多余订单
-            this.cleanupExcessOrders();
+            // 立即清理多余订单（异步执行，不阻塞主流程）
+            this.cleanupExcessOrders().catch(error => {
+                this.logger.error('紧急清理订单失败', { error: error.message });
+            });
             return true; // 强制更新订单
         }
 
@@ -956,6 +985,51 @@ class AvellanedaStrategy extends EventEmitter {
     }
 
     /**
+     * 紧急清理过多订单
+     */
+    async cleanupExcessOrders() {
+        try {
+            this.logger.info('开始紧急清理过多订单', {
+                currentOrderCount: this.activeOrders.size,
+                maxAllowed: 2
+            });
+            
+            // 获取所有活跃订单并按时间排序（保留最新的2个）
+            const orders = Array.from(this.activeOrders.values());
+            orders.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+            
+            // 取消多余的订单（保留最新的2个）
+            const ordersToCancel = orders.slice(2);
+            
+            for (const order of ordersToCancel) {
+                try {
+                    await this.exchangeManager.cancelOrder(order.id, this.config.get('symbol'));
+                    this.activeOrders.delete(order.id);
+                    this.logger.info('紧急取消多余订单', {
+                        orderId: order.id,
+                        side: order.side,
+                        price: order.price
+                    });
+                    console.log(`🗑️ 紧急取消订单 #${order.id.slice(-6)} (${order.side})`);
+                } catch (error) {
+                    this.logger.error('紧急取消订单失败', {
+                        orderId: order.id,
+                        error: error.message
+                    });
+                }
+            }
+            
+            this.logger.info('紧急清理完成', {
+                cancelledCount: ordersToCancel.length,
+                remainingCount: this.activeOrders.size
+            });
+            
+        } catch (error) {
+            this.logger.error('紧急清理过程中发生错误', { error: error.message });
+        }
+    }
+
+    /**
      * 取消活跃订单
      */
     async cancelActiveOrders() {
@@ -979,7 +1053,7 @@ class AvellanedaStrategy extends EventEmitter {
     }
 
     /**
-     * 创建订单
+     * 创建订单（增强网络状态检查）
      */
     async createOrders() {
         try {
@@ -990,8 +1064,27 @@ class AvellanedaStrategy extends EventEmitter {
                 return;
             }
             
+            // 检查交易所连接状态
+            if (!this.exchangeManager.isConnected) {
+                this.logger.warn('交易所未连接，跳过订单创建');
+                console.log('⚠️ 交易所未连接，跳过订单创建');
+                return;
+            }
+            
+            // 检查网络连接状态
+            if (this.exchangeManager.networkManager && !this.exchangeManager.networkManager.isNetworkAvailable()) {
+                this.logger.warn('网络不可用，跳过订单创建', {
+                    networkStatus: this.exchangeManager.networkManager.getNetworkStatus()
+                });
+                console.log('⚠️ 网络不可用，跳过订单创建');
+                return;
+            }
+            
             this.isCreatingOrders = true;
-            this.logger.info('开始创建订单，设置并发保护标志');
+            this.logger.info('开始创建订单，设置并发保护标志', {
+                networkAvailable: true,
+                exchangeConnected: true
+            });
             
             const { optimalBid, optimalAsk } = this.strategyState;
             const { currentInventory, targetInventory, totalInventoryValue } = this.strategyState;
@@ -1130,8 +1223,8 @@ class AvellanedaStrategy extends EventEmitter {
                 ]);
 
                 if (order && order.id) {
-                    // 订单已成功提交并返回ID
-                    this.logger.info('Order submitted', {
+                    // 订单已成功提交并返回ID，进行二次验证
+                    this.logger.info('Order submitted, verifying...', {
                         id: order.id,
                         clientOrderId: clientOrderId,
                         side,
@@ -1139,7 +1232,32 @@ class AvellanedaStrategy extends EventEmitter {
                         price,
                         status: order.status
                     });
-                    return order;
+                    
+                    // 等待一小段时间后验证订单是否真正存在
+                    await this.sleep(500);
+                    try {
+                        const verifyOrder = await this.exchangeManager.getOrderById(order.id);
+                        if (verifyOrder && verifyOrder.id === order.id) {
+                            this.logger.info('Order verification successful', {
+                                id: order.id,
+                                verifiedStatus: verifyOrder.status
+                            });
+                            return verifyOrder; // 返回验证后的订单信息
+                        } else {
+                            this.logger.warn('Order verification failed - order not found', {
+                                id: order.id,
+                                clientOrderId: clientOrderId
+                            });
+                            throw new Error('订单验证失败 - 订单不存在');
+                        }
+                    } catch (verifyError) {
+                        this.logger.warn('Order verification error, using original order', {
+                            id: order.id,
+                            error: verifyError.message
+                        });
+                        // 验证失败时仍返回原订单，但记录警告
+                        return order;
+                    }
                 } else {
                     // 订单提交失败，但没有抛出异常（例如返回null或空对象）
                     throw new Error('无效订单返回');
