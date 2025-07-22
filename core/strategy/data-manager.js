@@ -33,7 +33,7 @@ class DataManager {
             this.logger.debug('开始更新市场数据');
             
             // 获取订单簿数据
-            const orderbook = await this.strategy.exchangeManager.getOrderbook();
+            const orderbook = await this.strategy.exchangeManager.getOrderBook();
             if (!orderbook || !orderbook.bids || !orderbook.asks || 
                 orderbook.bids.length === 0 || orderbook.asks.length === 0) {
                 this.logger.warn('获取到的订单簿数据无效或为空', {
@@ -183,15 +183,21 @@ class DataManager {
             this.logger.debug('开始更新技术指标');
             
             // 更新技术指标
-            await this.strategy.indicators.update({
-                price: this.strategy.currentMarketData.midPrice,
-                volume: this.strategy.currentMarketData.bidVolume + this.strategy.currentMarketData.askVolume,
-                timestamp: now,
-                orderbook: this.strategy.currentMarketData.orderbook
-            });
+            this.strategy.indicators.updatePrice(this.strategy.currentMarketData.midPrice, now);
+            
+            // 更新订单簿数据到交易强度指标
+            if (this.strategy.currentMarketData.orderbook && 
+                this.strategy.currentMarketData.orderbook.bids && 
+                this.strategy.currentMarketData.orderbook.asks) {
+                this.strategy.indicators.updateOrderBook(
+                    this.strategy.currentMarketData.orderbook.bids,
+                    this.strategy.currentMarketData.orderbook.asks,
+                    now
+                );
+            }
             
             // 获取更新后的指标值
-            const indicatorValues = this.strategy.indicators.getValues();
+            const indicatorValues = this.strategy.indicators.getCurrentValues();
             
             // 更新策略状态中的波动率
             if (indicatorValues.volatility !== undefined) {
