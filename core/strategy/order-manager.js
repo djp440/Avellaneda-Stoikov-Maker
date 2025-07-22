@@ -86,7 +86,7 @@ class OrderManager {
             return true;
         }
         
-        // 智能订单管理：允许的情况下最多1个买单和1个卖单存在
+        // 智能订单管理：允许的情况下最多1个买单和1个卖单存在，总订单数受配置限制
         // 检查当前余额，确定应该有哪些类型的订单
         const balances = this.strategy.exchangeManager.getBalances();
         const { optimalBid, optimalAsk } = this.strategy.strategyState;
@@ -128,7 +128,7 @@ class OrderManager {
                 canCreateSell,
                 needBuyOrder,
                 needSellOrder,
-                strategy: '允许的情况下最多1个买单和1个卖单存在'
+                strategy: `允许的情况下最多1个买单和1个卖单存在，总订单数不超过${this.config.get('maxOrders') || 10}个`
             });
             return true;
         } else {
@@ -142,9 +142,11 @@ class OrderManager {
         }
         
         // 检查是否存在过多订单（紧急清理）
-        if (this.activeOrders.size > 2) {
+        const maxOrders = this.config.get('maxOrders') || 10;
+        if (this.activeOrders.size > maxOrders) {
             this.logger.warn('检测到过多活跃订单，触发紧急清理', {
                 activeOrdersCount: this.activeOrders.size,
+                maxOrders: maxOrders,
                 activeOrders: Array.from(this.activeOrders.values()).map(o => ({
                     id: o.id,
                     side: o.side,
@@ -152,9 +154,9 @@ class OrderManager {
                     price: o.price,
                     status: o.status
                 })),
-                reason: '订单数量超过限制（最多2个）'
+                reason: `订单数量超过限制（最多${maxOrders}个）`
             });
-            console.log(`⚠️ 检测到 ${this.activeOrders.size} 个活跃订单（超过限制），触发紧急清理`);
+            console.log(`⚠️ 检测到 ${this.activeOrders.size} 个活跃订单（超过限制${maxOrders}个），触发紧急清理`);
             
             // 立即清理多余订单（异步执行，不阻塞主流程）
             this.cleanupExcessOrders().catch(error => {
@@ -263,8 +265,9 @@ class OrderManager {
             const orders = Array.from(this.activeOrders.values())
                 .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
             
-            // 取消多余的订单（保留最新的2个）
-            const ordersToCancel = orders.slice(2);
+            // 取消多余的订单（保留配置允许的数量）
+            const maxOrders = this.config.get('maxOrders') || 10;
+            const ordersToCancel = orders.slice(maxOrders);
             
             for (const order of ordersToCancel) {
                 try {

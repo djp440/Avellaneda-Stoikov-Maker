@@ -139,8 +139,24 @@ class EventHandler extends EventEmitter {
      */
     handleConnectionRestored() {
         this.logger.info('交易所连接恢复，继续策略执行');
-        // 连接恢复时同步挂单
-        this.strategy.orderManager.syncActiveOrdersFromExchange();
+        
+        // 等待连接稳定后再同步挂单，避免在连接不稳定时同步失败
+        setTimeout(async () => {
+            try {
+                this.logger.info('开始同步交易所订单状态...');
+                await this.strategy.orderManager.syncActiveOrdersFromExchange();
+                
+                // 同步完成后，强制触发一次订单更新检查
+                // 这样可以确保在网络恢复后及时补充缺失的订单
+                this.logger.info('订单同步完成，触发订单状态检查');
+                if (this.strategy.orderManager.shouldUpdateOrders()) {
+                    await this.strategy.orderManager.updateOrders();
+                }
+            } catch (error) {
+                this.logger.error('连接恢复后订单同步失败', error);
+            }
+        }, 3000); // 等待3秒确保连接稳定
+        
         // 可以在这里添加连接恢复时的其他处理逻辑
     }
 
