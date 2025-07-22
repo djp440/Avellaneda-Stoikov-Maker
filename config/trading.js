@@ -16,17 +16,12 @@ module.exports = {
     maxSpread: 0.03,                       // 最大价差，高于此值不会下单
     inventoryTarget: 0,                    // 库存目标，0表示中性，正数表示做多偏好，负数表示做空偏好
     shapeFactor: 2.0,                      // 形状因子，影响订单簿的形状，控制订单分布
-    shapeFactor: 2.0,                      // 形状因子，影响订单簿的形状，控制订单分布
 
     // 执行控制
     updateInterval: 5000,                  // 更新间隔，策略执行频率，单位为毫秒
     maxOrders: 2,                         // 最大订单数量，同时存在的订单上限
     orderTimeout: 10000,                   // 订单超时时间，单位为毫秒，超时后取消订单
-    updateInterval: 5000,                  // 更新间隔，策略执行频率，单位为毫秒
-    maxOrders: 2,                         // 最大订单数量，同时存在的订单上限
-    orderTimeout: 10000,                   // 订单超时时间，单位为毫秒，超时后取消订单
     priceChangeThreshold: 0.001,           // 价格变化阈值，只有当价格变化超过此百分比时才更新订单，避免无意义的订单更新
-    orderMonitoringInterval: 5000,         // 订单监控间隔，单位为毫秒，用于主动检查订单状态变化
     orderMonitoringInterval: 5000,         // 订单监控间隔，单位为毫秒，用于主动检查订单状态变化
 
     // 风险管理 - 持仓控制
