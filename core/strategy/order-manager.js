@@ -95,11 +95,11 @@ class OrderManager {
         const baseAmount = this.config.get('orderAmount');
         const buyAmount = this.strategy.calculator.calculateOrderAmount(
             baseAmount, this.strategy.strategyState.currentInventory, 
-            this.strategy.strategyState.targetInventory, this.strategy.strategyState.totalInventoryValue, true
+            this.strategy.strategyState.targetInventory, this.strategy.strategyState.totalInventoryValue, true, this.strategy.strategyState.optimalBid
         );
         const sellAmount = this.strategy.calculator.calculateOrderAmount(
             baseAmount, this.strategy.strategyState.currentInventory, 
-            this.strategy.strategyState.targetInventory, this.strategy.strategyState.totalInventoryValue, false
+            this.strategy.strategyState.targetInventory, this.strategy.strategyState.totalInventoryValue, false, this.strategy.strategyState.optimalAsk
         );
         
         // 检查是否可以创建买单和卖单
@@ -371,14 +371,14 @@ class OrderManager {
             const adjustedBaseAmount = Math.max(baseAmount, minAmount * 10);
             
             const buyAmount = this.strategy.calculator.calculateOrderAmount(
-                adjustedBaseAmount, currentInventory, targetInventory, totalInventoryValue, true
+                adjustedBaseAmount, currentInventory, targetInventory, totalInventoryValue, true, optimalBid
             );
             const sellAmount = this.strategy.calculator.calculateOrderAmount(
-                adjustedBaseAmount, currentInventory, targetInventory, totalInventoryValue, false
+                adjustedBaseAmount, currentInventory, targetInventory, totalInventoryValue, false, optimalAsk
             );
             
             // 紧凑输出订单信息
-            const inventorySkew = ((currentInventory - targetInventory) / totalInventoryValue * 100).toFixed(2);
+            const inventorySkew = (this.strategy.calculator.calculateInventorySkew(currentInventory, targetInventory, totalInventoryValue, this.strategy.exchangeManager.getMarketPrice()) * 100).toFixed(2);
             console.log(`🔄下单 | 买: ${buyAmount.toFixed(4)}@${optimalBid.toFixed(2)} | 卖: ${sellAmount.toFixed(4)}@${optimalAsk.toFixed(2)} | 库存偏差: ${inventorySkew}%`);
             
             // 并发创建买单和卖单

@@ -219,21 +219,28 @@ class AvellanedaCalculator {
      * @param {number} totalInventory - 总库存价值
      * @returns {number} 库存偏差比例
      */
-    calculateInventorySkew(currentInventory, targetInventory, totalInventory) {
+    calculateInventorySkew(currentInventory, targetInventory, totalInventoryValue, price) {
         try {
-            if (!totalInventory || totalInventory <= 0) {
+            if (!totalInventoryValue || totalInventoryValue <= 0 || !price || price <= 0) {
                 return 0;
             }
-            
-            const inventorySkew = (currentInventory - targetInventory) / totalInventory;
-            
+
+            const totalInventoryInBase = totalInventoryValue / price;
+            if (totalInventoryInBase <= 0) {
+                return 0;
+            }
+
+            const inventorySkew = (currentInventory - targetInventory) / totalInventoryInBase;
+
             this.logger.debug('Inventory skew calculated', {
                 currentInventory,
                 targetInventory,
-                totalInventory,
+                totalInventoryValue,
+                price,
+                totalInventoryInBase,
                 inventorySkew
             });
-            
+
             return inventorySkew;
         } catch (error) {
             this.logger.error('Error calculating inventory skew', error);
@@ -322,15 +329,15 @@ class AvellanedaCalculator {
      * @param {boolean} isBuy - 是否为买单
      * @returns {number} 计算后的订单数量
      */
-    calculateOrderAmount(baseAmount, currentInventory, targetInventory, totalInventory, isBuy) {
+    calculateOrderAmount(baseAmount, currentInventory, targetInventory, totalInventoryValue, isBuy, price) {
         try {
             if (!baseAmount || baseAmount <= 0) {
                 return 0;
             }
-            
+
             // 计算库存偏差
-            const inventorySkew = this.calculateInventorySkew(currentInventory, targetInventory, totalInventory);
-            
+            const inventorySkew = this.calculateInventorySkew(currentInventory, targetInventory, totalInventoryValue, price);
+
             // 应用形状因子调整
             let adjustedAmount = this.applyShapeFactor(baseAmount, inventorySkew, isBuy);
             
@@ -345,7 +352,7 @@ class AvellanedaCalculator {
                 baseAmount,
                 currentInventory,
                 targetInventory,
-                totalInventory,
+                totalInventoryValue,
                 inventorySkew,
                 isBuy,
                 adjustedAmount,
@@ -378,18 +385,18 @@ class AvellanedaCalculator {
             baseAmount,
             currentInventory,
             targetInventory,
-            totalInventory,
+            totalInventoryValue,
             inventorySkew,
             isBuy,
             adjustedAmount,
             finalAmount
         } = data;
-        
+
         console.log(`\n📦 ${isBuy ? '买单' : '卖单'}数量计算:`);
         console.log('─'.repeat(40));
-        
-        console.log(`📊 基础参数: 原始数量 ${baseAmount.toFixed(8)} | 当前库存 ${currentInventory.toFixed(8)} | 目标库存 ${targetInventory.toFixed(8)} | 总库存价值 ${totalInventory.toFixed(2)} USDT`);
-        
+
+        console.log(`📊 基础参数: 原始数量 ${baseAmount.toFixed(8)} | 当前库存 ${currentInventory.toFixed(8)} | 目标库存 ${targetInventory.toFixed(8)} | 总库存价值 ${totalInventoryValue.toFixed(2)} USDT`);
+
         console.log(`🎯 库存偏差: ${inventorySkew.toFixed(6)} (${(inventorySkew * 100).toFixed(4)}%)`);
         
         // 计算调整因子
@@ -504,7 +511,7 @@ class AvellanedaCalculator {
             const targetInventory = this.calculateTargetInventory(inventoryValue.totalValue, midPrice);
             
             // 计算库存偏差
-            const inventorySkew = this.calculateInventorySkew(baseAmount, targetInventory, inventoryValue.totalValue);
+            const inventorySkew = this.calculateInventorySkew(baseAmount, targetInventory, inventoryValue.totalValue, midPrice);
             
             // 计算最优价差
             const optimalSpread = this.calculateOptimalSpread(volatility, tradingIntensity);
